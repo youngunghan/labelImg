@@ -41,7 +41,7 @@ from libs.labelFile import LabelFile, LabelFileError, LabelFileFormat
 from libs.toolBar import ToolBar
 from libs.pascal_voc_io import PascalVocReader
 from libs.pascal_voc_io import XML_EXT
-from libs.yolo_io import YoloReader
+from libs.yolo_io import YoloReader, YoloParseError
 from libs.yolo_io import TXT_EXT
 from libs.create_ml_io import CreateMLReader
 from libs.create_ml_io import JSON_EXT
@@ -1906,10 +1906,20 @@ class MainWindow(QMainWindow, WindowMixin):
             return
 
         self.set_format(FORMAT_YOLO)
-        t_yolo_parse_reader = YoloReader(txt_path, self.image)
+        # A missing classes.txt or an unreadable file must not crash the app —
+        # show the image without labels and tell the user what went wrong.
+        try:
+            t_yolo_parse_reader = YoloReader(txt_path, self.image)
+        except (YoloParseError, EnvironmentError, UnicodeError) as e:
+            self.error_message(u'Error opening YOLO annotation',
+                               u'<b>Could not load "%s"</b>.<br/>%s'
+                               % (os.path.basename(txt_path), e))
+            return
         shapes = t_yolo_parse_reader.get_shapes()
-        print(shapes)
         self.load_labels(shapes)
+        if t_yolo_parse_reader.skipped_lines:
+            self.status('Skipped %d malformed line(s) in %s'
+                        % (t_yolo_parse_reader.skipped_lines, os.path.basename(txt_path)))
         self.canvas.verified = t_yolo_parse_reader.verified
 
     def load_create_ml_json_by_filename(self, json_path, file_path):
@@ -1962,7 +1972,11 @@ def get_main_app(argv=None):
     """
     if not argv:
         argv = []
-    app = QApplication(argv)
+    # QApplication is a process-wide singleton — reuse an existing instance
+    # (e.g. when several tests construct the app) instead of crashing.
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(argv)
     app.setApplicationName(__appname__)
     app.setWindowIcon(new_icon("app"))
     # Tzutalin 201705+: Accept extra agruments to change predefined class file

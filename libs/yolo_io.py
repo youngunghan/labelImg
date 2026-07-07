@@ -8,6 +8,11 @@ from libs.constants import DEFAULT_ENCODING
 TXT_EXT = '.txt'
 ENCODE_METHOD = DEFAULT_ENCODING
 
+
+class YoloParseError(Exception):
+    """Raised when a YOLO annotation cannot be loaded (e.g. classes.txt missing)."""
+
+
 class YOLOWriter:
 
     def __init__(self, folder_name, filename, img_size, database_src='Unknown', local_img_path=None):
@@ -94,8 +99,14 @@ class YoloReader:
 
         # print (file_path, self.class_list_path)
 
-        classes_file = open(self.class_list_path, 'r')
-        self.classes = classes_file.read().strip('\n').split('\n')
+        # Without classes.txt the numeric class indices cannot be mapped to
+        # names — fail with a clear error instead of an unhandled crash.
+        if not os.path.isfile(self.class_list_path):
+            raise YoloParseError(
+                'classes.txt not found at "%s" — required to map YOLO class '
+                'indices to label names.' % self.class_list_path)
+        with open(self.class_list_path, 'r') as classes_file:
+            self.classes = classes_file.read().strip('\n').split('\n')
 
         # print (self.classes)
 
@@ -105,10 +116,10 @@ class YoloReader:
         self.img_size = img_size
 
         self.verified = False
-        # try:
+        # Count of malformed annotation lines skipped by parse_yolo_format,
+        # so the caller can tell the user the file was only partially read.
+        self.skipped_lines = 0
         self.parse_yolo_format()
-        # except:
-        #     pass
 
     def get_shapes(self):
         return self.shapes
@@ -134,10 +145,27 @@ class YoloReader:
         return label, x_min, y_min, x_max, y_max
 
     def parse_yolo_format(self):
-        bnd_box_file = open(self.file_path, 'r')
-        for bndBox in bnd_box_file:
-            class_index, x_center, y_center, w, h = bndBox.strip().split(' ')
-            label, x_min, y_min, x_max, y_max = self.yolo_line_to_shape(class_index, x_center, y_center, w, h)
+        with open(self.file_path, 'r') as bnd_box_file:
+            for line in bnd_box_file:
+                parts = line.split()
+                if not parts:
+                    continue  # blank line
+                # A malformed line (wrong field count, non-numeric or
+                # non-finite value, class index outside classes.txt) must not
+                # abort the whole load — skip it and keep the valid shapes.
+                try:
+                    if len(parts) != 5:
+                        raise ValueError('expected 5 fields, got %d' % len(parts))
+                    class_index = int(parts[0])
+                    if not 0 <= class_index < len(self.classes):
+                        raise ValueError('class index %d outside classes.txt (%d entries)'
+                                         % (class_index, len(self.classes)))
+                    x_center, y_center, w, h = (float(v) for v in parts[1:5])
+                    # round() below raises on NaN (ValueError) / inf (OverflowError)
+                    label, x_min, y_min, x_max, y_max = self.yolo_line_to_shape(class_index, x_center, y_center, w, h)
+                except (ValueError, OverflowError):
+                    self.skipped_lines += 1
+                    continue
 
-            # Caveat: difficult flag is discarded when saved as yolo format.
-            self.add_shape(label, x_min, y_min, x_max, y_max, False)
+                # Caveat: difficult flag is discarded when saved as yolo format.
+                self.add_shape(label, x_min, y_min, x_max, y_max, False)
