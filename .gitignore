@@ -7,6 +7,8 @@ labelImg.egg-info*
 
 build/
 dist/
+dist_labelimg/
+dist_labelimg.zip
 
 tags
 cscope*

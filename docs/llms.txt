@@ -1,0 +1,32 @@
+# labelImg
+
+> Python + PyQt5 데스크톱 이미지 바운딩박스 주석 도구(v1.8.6). 이미지 위에 사각형을 그려 라벨을 붙이고 PASCAL VOC XML / YOLO txt / CreateML JSON 세 포맷으로 저장한다. 단일 윈도우 앱: `MainWindow`(labelImg.py)가 컨트롤러, `Canvas`(libs/canvas.py)가 드로잉 위젯, `Shape`(libs/shape.py)가 박스 1개. 포맷 저장은 `LabelFile`(libs/labelFile.py)이 포맷별 Writer(PascalVocWriter·YOLOWriter·CreateMLWriter)로 위임하고, 로드는 `MainWindow`가 포맷별 Reader(PascalVocReader·YoloReader·CreateMLReader)를 직접 호출한다. 설정은 `~/.labelImgSettings.pkl`(pickle). 의존성 pyqt5·lxml. 리소스(아이콘·i18n 문자열)는 `resources.qrc`를 `pyrcc5`로 `libs/resources.py`에 컴파일. 코드 정본은 이 저장소.
+
+## Tutorials
+- [처음 실행](tutorials/first-run.md): 설치 → 이미지 폴더 열기 → 박스 그리기 → 저장
+
+## How-to
+- [설치/빌드](how-to/install-and-build.md): pip / 소스(make qt5py3=pyrcc5) / pyinstaller 패키징
+- [PASCAL VOC 라벨링](how-to/annotate-pascal-voc.md): 기본 XML 포맷
+- [YOLO 라벨링](how-to/annotate-yolo.md): txt + classes.txt 사이드카, 인덱스 주의
+- [CreateML 라벨링](how-to/annotate-createml.md): 누적 JSON
+- [verify/difficult](how-to/verify-and-difficult.md): 검증 플래그·difficult·single-class vs use-default-label·auto-save·draw-square·display-labels
+- [추가 기능](how-to/more-features.md): ⚠️분류 good/bad(g/b, 파일 이동)·이전박스 복사(Ctrl+V)·Edit Default Classes·advanced 모드·밝기(LightWidget)·박스 색·fit/recent. 포크 고유 기능 포함
+- [CSV export](how-to/export-to-csv.md): tools/label_to_csv.py → Google Cloud AutoML CSV
+- [설정 리셋/문제해결](how-to/reset-and-troubleshoot.md): .labelImgSettings.pkl, classes 로딩
+
+## Reference
+- [모듈 인벤토리](reference/modules.md): 파일별 클래스/함수
+- [포맷 스펙](reference/formats.md): VOC/YOLO/CreateML 정확한 구조·좌표 규약
+- [설정 키](reference/settings.md): Settings·SETTING_* 키
+- [단축키](reference/shortcuts.md): 핫키 표
+
+## Explanation
+- [아키텍처](explanation/architecture.md): MainWindow(God-object)↔Canvas↔Shape↔I/O, Qt 시그널/슬롯
+- [어노테이션 포맷 설계](explanation/annotation-formats.md): 3포맷·전환·reader/writer 대칭·difficult/verified
+- [캔버스 상호작용 모델](explanation/canvas-interaction-model.md): CREATE/EDIT·마우스·정점이동·정사각형·줌/패닝
+
+## Source of truth
+- 코드: `labelImg.py`, `libs/*.py`, `tools/label_to_csv.py`
+- 빌드: `Makefile`, `setup.py`, `resources.qrc`, `requirements/`
+- 버전: `libs/__init__.py` (1.8.6)

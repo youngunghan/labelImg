@@ -1,0 +1,74 @@
+# 레퍼런스: 단축키(핫키)
+
+코드의 액션 정의(`labelImg.py` `__init__`) 기준 전체 단축키. 루트 [../../README.rst](../../README.rst)의 핫키 표는 이 중 일부만 싣는다.
+
+## 파일·디렉터리
+
+| 키 | 동작 |
+|---|---|
+| `Ctrl+O` | 파일 열기(Open) |
+| `Ctrl+u` | 디렉터리 열기(Open Dir) — 모든 이미지 로드 |
+| `Ctrl+r` | 기본 어노테이션 저장 디렉터리 변경 |
+| `Ctrl+Shift+O` | 어노테이션 파일 열기 |
+| `Ctrl+S` | 저장 |
+| `Ctrl+Shift+S` | 다른 이름으로 저장(Save As) |
+| `Ctrl+Y` | 저장 포맷 전환(PascalVOC→YOLO→CreateML 순환) |
+| `Ctrl+W` | 현재 파일 닫기 |
+| `Ctrl+Shift+D` | 현재 이미지 삭제 |
+| `d` / `a` | 다음 / 이전 이미지 |
+| `Ctrl+Q` | 종료(Quit) |
+
+## 박스 그리기·편집
+
+| 키 | 동작 |
+|---|---|
+| `w` | 사각형 박스 생성(Create RectBox) |
+| `Ctrl+E` | 선택 박스의 라벨 편집 |
+| `Ctrl+D` | 현재 라벨·박스 복사 |
+| `Ctrl+V` | **이전 이미지의 박스 복사**(현재 이미지에 올리고 저장) → [../how-to/more-features.md](../how-to/more-features.md) |
+| `Delete` | 선택한 박스 삭제 |
+| `↑ → ↓ ←` | 선택한 박스를 1픽셀 이동 |
+| `Esc` | 그리던 박스 취소 |
+| `Return` | 그리던 박스 닫기/확정(메인 Enter 키만 해당, 숫자패드 Enter 미지원) |
+| `Ctrl`(누른 채 그리기) | 정사각형으로 제약 |
+| `Ctrl+Shift+R` | Draw Squares 모드 토글 |
+| `Ctrl+H` / `Ctrl+A` | 모든 박스 숨기기 / 보이기 |
+
+## 보기 (줌·맞춤·밝기)
+
+| 키 | 동작 |
+|---|---|
+| `Ctrl++` / `Ctrl+-` | 줌 인 / 아웃 |
+| `Ctrl+=` | 원본 크기(100%) |
+| `Ctrl+F` | 창에 맞춤(Fit Window) |
+| `Ctrl+Shift+F` | 너비에 맞춤(Fit Width) |
+| `Ctrl+휠` | 줌 인/아웃 |
+| `Ctrl+Shift++` / `Ctrl+Shift+-` | 밝게 / 어둡게 |
+| `Ctrl+Shift+=` | 밝기 리셋(50%) |
+| `Ctrl+Shift+휠` | 밝기 조절 |
+| 휠 / 좌클릭 드래그(빈 영역) | 스크롤·패닝 |
+
+## 검증·모드·색
+
+| 키 | 동작 |
+|---|---|
+| `Space` | 현재 이미지의 **verified** 상태 토글(연녹색 배경; 다시 누르면 해제). 라벨 파일이 없으면 먼저 저장해 생성 |
+| `Ctrl+Shift+C` | Single Class Mode 토글(직전 라벨 재사용) |
+| `Ctrl+Shift+P` | 박스 위 라벨 표시 토글(Display Labels) |
+| `Ctrl+Shift+L` | 라벨 패널(Box Labels 도크) 표시/숨김 |
+| `Ctrl+Shift+A` | 고급 모드(Advanced) 토글 |
+| `Ctrl+L` | 박스 선 색 변경(Box Line Color) |
+| `Ctrl+Shift+E` | 사전 정의 클래스 편집(영구 저장) |
+| `Ctrl+J` | Edit 모드(고급 모드의 분리 액션) |
+
+## ⚠️ 이미지 분류 (파일 이동 — 주의)
+
+| 키 | 동작 |
+|---|---|
+| `g` | Classify Good — 현재 이미지+라벨을 `<폴더>_good/`로 **이동** 후 다음 |
+| `b` | Classify Bad — `<폴더>_bad/`로 **이동** 후 다음 |
+| `Ctrl+Z` | 마지막 분류 이동 되돌리기(Undo Classify) |
+
+> `g`/`b`는 수정자 없는 단일 키이고 디스크에서 파일을 옮긴다. 상세·주의는 [../how-to/more-features.md](../how-to/more-features.md).
+
+verify·difficult·single-class 등 워크플로는 [../how-to/verify-and-difficult.md](../how-to/verify-and-difficult.md) 참고.

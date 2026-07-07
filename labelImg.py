@@ -90,6 +90,9 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Save as Pascal voc xml
         self.default_save_dir = default_save_dir
+        # 명령줄 3번째 인자(save_dir). 시작 시 open_dir_dialog가 default_save_dir를
+        # 연 폴더로 재설정할 때 이 값이 있으면 유지한다.
+        self._cli_save_dir = default_save_dir
         self.label_file_format = settings.get(SETTING_LABEL_FILE_FORMAT, LabelFileFormat.PASCAL_VOC)
 
         # For loading all image under a directory
@@ -99,6 +102,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.last_open_dir = None
         self.cur_img_idx = 0
         self.img_count = len(self.m_img_list)
+        # Stack of classify (good/bad) moves so they can be undone with Ctrl+Z.
+        # Each entry is a list of (dest_path, original_path) for the image + its labels.
+        self.classify_history = []
 
         # Whether we need to save or not.
         self.dirty = False
@@ -107,8 +113,11 @@ class MainWindow(QMainWindow, WindowMixin):
         self._beginner = True
         self.screencast = "https://youtu.be/p0nR2YsCY_U"
 
-        # Load predefined classes to the list
-        self.load_predefined_classes(default_prefdef_class_file)
+        # Persistent predefined classes (survives restart; editable via menu).
+        # When frozen (exe), the bundled file lives in a temp dir and is NOT
+        # persistent, so use a writable file next to the executable instead.
+        self.predefined_classes_file = self.get_persistent_classes_file(default_prefdef_class_file)
+        self.load_predefined_classes(self.predefined_classes_file)
 
         if self.label_hist:
             self.default_label = self.label_hist[0]
@@ -217,6 +226,9 @@ class MainWindow(QMainWindow, WindowMixin):
         quit = action(get_str('quit'), self.close,
                       'Ctrl+Q', 'quit', get_str('quitApp'))
 
+        edit_classes = action('Edit Default Classes', self.edit_default_classes,
+                              'Ctrl+Shift+E', 'edit', 'Edit predefined class list (saved permanently)')
+
         open = action(get_str('openFile'), self.open_file,
                       'Ctrl+O', 'open', get_str('openFileDetail'))
 
@@ -264,6 +276,17 @@ class MainWindow(QMainWindow, WindowMixin):
         close = action(get_str('closeCur'), self.close_file, 'Ctrl+W', 'close', get_str('closeCurDetail'))
 
         delete_image = action(get_str('deleteImg'), self.delete_image, 'Ctrl+Shift+D', 'close', get_str('deleteImgDetail'))
+
+        sort_good = action('Classify Good (→ _good)', partial(self.classify_current_image, 'good'),
+                           'g', 'next',
+                           'Move current image + its label to "<folder>_good" and go to next',
+                           enabled=False)
+        sort_bad = action('Classify Bad (→ _bad)', partial(self.classify_current_image, 'bad'),
+                          'b', 'close',
+                          'Move current image + its label to "<folder>_bad" and go to next',
+                          enabled=False)
+        undo_sort = action('Undo Classify', self.undo_classify, 'Ctrl+Z', 'undo',
+                           'Undo the last good/bad classify move')
 
         reset_all = action(get_str('resetAll'), self.reset_all, None, 'resetall', get_str('resetAllDetail'))
 
@@ -381,6 +404,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
+                              sortGood=sort_good, sortBad=sort_bad, undoSort=undo_sort,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
@@ -398,7 +422,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               advancedContext=(create_mode, edit_mode, edit, copy,
                                                delete, shape_line_color, shape_fill_color),
                               onLoadActive=(
-                                  close, create, create_mode, edit_mode),
+                                  close, create, create_mode, edit_mode, sort_good, sort_bad),
                               onShapesPresent=(save_as, hide_all, show_all))
 
         self.menus = Struct(
@@ -415,7 +439,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.auto_saving.setChecked(settings.get(SETTING_AUTO_SAVE, False))
         # Sync single class mode from PR#106
         self.single_class_mode = QAction(get_str('singleClsMode'), self)
-        self.single_class_mode.setShortcut("Ctrl+Shift+S")
+        self.single_class_mode.setShortcut("Ctrl+Shift+C")
         self.single_class_mode.setCheckable(True)
         self.single_class_mode.setChecked(settings.get(SETTING_SINGLE_CLASS, False))
         self.lastLabel = None
@@ -427,7 +451,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.display_label_option.triggered.connect(self.toggle_paint_labels_option)
 
         add_actions(self.menus.file,
-                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, quit))
+                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, sort_good, sort_bad, undo_sort, edit_classes, quit))
         add_actions(self.menus.help, (help_default, show_info, show_shortcut))
         add_actions(self.menus.view, (
             self.auto_saving,
@@ -520,9 +544,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.update_file_menu()
 
         # Since loading the file may take some time, make sure it runs in the background.
-        if self.file_path and os.path.isdir(self.file_path):
-            self.queue_event(partial(self.import_dir_images, self.file_path or ""))
-        elif self.file_path:
+        # 디렉터리 인자는 아래 open_dir_dialog(silent=True)가 임포트하므로 여기서는
+        # 단일 파일 경로만 큐에 올린다(같은 폴더 중복 임포트 방지).
+        if self.file_path and not os.path.isdir(self.file_path):
             self.queue_event(partial(self.load_file, self.file_path or ""))
 
         # Callbacks:
@@ -909,8 +933,8 @@ class MainWindow(QMainWindow, WindowMixin):
                 self.label_file.save_create_ml_format(annotation_file_path, shapes, self.file_path, self.image_data,
                                                       self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
             else:
-                self.label_file.save(annotation_file_path, shapes, self.file_path, self.image_data,
-                                     self.line_color.getRgb(), self.fill_color.getRgb())
+                # LabelFile.save is disabled (commented out) — fail loudly here.
+                raise LabelFileError('Unsupported label file format: %s' % self.label_file_format)
             print('Image:{0} -> Annotation:{1}'.format(self.file_path, annotation_file_path))
             return True
         except LabelFileError as e:
@@ -1344,8 +1368,12 @@ class MainWindow(QMainWindow, WindowMixin):
         if not self.may_continue():
             return
 
-        default_open_dir_path = dir_path if dir_path else '.'
-        if self.last_open_dir and os.path.exists(self.last_open_dir):
+        # 명시적으로 dir_path가 주어지면(시작 시 명령줄 인자 등) 그 폴더를 그대로 쓴다.
+        # last_open_dir가 우선하면 이전 세션 폴더가 명령줄로 연 폴더를 가려
+        # 라벨(xml)을 못 찾게 된다.
+        if dir_path:
+            default_open_dir_path = dir_path
+        elif self.last_open_dir and os.path.exists(self.last_open_dir):
             default_open_dir_path = self.last_open_dir
         else:
             default_open_dir_path = os.path.dirname(self.file_path) if self.file_path else '.'
@@ -1355,11 +1383,19 @@ class MainWindow(QMainWindow, WindowMixin):
                                                                     QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks))
         else:
             target_dir_path = ustr(default_open_dir_path)
+        if not target_dir_path:
+            # 다이얼로그 취소 — 열린 폴더/저장 폴더 상태를 건드리지 않는다.
+            return
         self.last_open_dir = target_dir_path
+        # 임포트 전에 라벨 저장/조회 폴더부터 확정해야 첫 이미지의 XML을 올바른
+        # 폴더에서 읽는다(load_file이 show_bounding_box_from_annotation_file을 호출
+        # 하므로 여기서 또 호출하면 박스가 이중으로 로드된다).
+        # 시작 시 명령줄 save_dir가 명시된 경우에는 그것을 유지한다.
+        if silent and self._cli_save_dir:
+            self.default_save_dir = self._cli_save_dir
+        else:
+            self.default_save_dir = target_dir_path
         self.import_dir_images(target_dir_path)
-        self.default_save_dir = target_dir_path
-        if self.file_path:
-            self.show_bounding_box_from_annotation_file(file_path=self.file_path)
 
     def import_dir_images(self, dir_path):
         if not self.may_continue() or not dir_path:
@@ -1530,6 +1566,186 @@ class MainWindow(QMainWindow, WindowMixin):
             else:
                 self.close_file()
 
+    def classify_current_image(self, target, _value=False):
+        """현재 이미지와 그 라벨 파일을 '<현재폴더>_<target>' 형제 폴더로 옮기고
+        다음 이미지로 넘어간다. target 은 'good' 또는 'bad'.
+        품질 판정은 사용자가 호출한 단축키(target)로만 결정된다(자동 감지 아님)."""
+        if self.file_path is None:
+            return
+        if not self.last_open_dir:
+            self.status('Open a directory first (Open Dir).')
+            return
+        # 현재 파일이 로드된 디렉터리 목록에 속하는지 확인 — Open File로 단일 파일을 연
+        # 뒤(혹은 last_open_dir가 이전 디렉터리 값일 때) 엉뚱한 <last_open_dir>_good/_bad
+        # 로 이동하는 것을 막는다.
+        if not self.m_img_list or self.file_path not in self.m_img_list:
+            self.status('Classify needs the current image to belong to the opened directory (use Open Dir).')
+            return
+
+        # 미저장 변경: 기존 앱과 동일하게 저장/폐기/취소. Cancel이면 중단.
+        if not self.may_continue():
+            return
+        # No(폐기) 시 dirty가 남아 import_dir_images의 may_continue가 재프롬프트하므로 정리.
+        self.set_clean()
+
+        base = os.path.normpath(self.last_open_dir)
+        dest_dir = os.path.join(os.path.dirname(base),
+                                os.path.basename(base) + '_' + target)
+        dest_pre_existed = os.path.isdir(dest_dir)
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except OSError as e:
+            self.status('Cannot create folder %s: %s' % (dest_dir, e))
+            return
+
+        def _cleanup_dest_dir():
+            # 우리가 이번에 새로 만든 빈 대상 폴더만 제거(기존 폴더는 보존).
+            if not dest_pre_existed:
+                try:
+                    os.rmdir(dest_dir)
+                except OSError:
+                    pass
+
+        src_image = self.file_path
+        # cur_img_idx는 Open File 경로에서 0으로 강제될 수 있어(1484행) 목록 기준으로 재계산.
+        # 위 가드가 file_path in m_img_list 를 보장하므로 index()는 실패하지 않는다.
+        idx = self.m_img_list.index(self.file_path)
+        # 라벨 위치: default_save_dir가 있으면 거기, 없으면 이미지 옆.
+        label_dir = self.default_save_dir if self.default_save_dir else os.path.dirname(src_image)
+        stem, img_ext = os.path.splitext(os.path.basename(src_image))
+
+        # 대상 폴더에서 이미지/라벨 어느 것과도 충돌하지 않는 새 stem 계산
+        def _taken(s):
+            candidates = [os.path.join(dest_dir, s + img_ext)]
+            candidates += [os.path.join(dest_dir, s + e) for e in (XML_EXT, TXT_EXT, JSON_EXT)]
+            return any(os.path.exists(p) for p in candidates)
+
+        new_stem, i = stem, 1
+        while _taken(new_stem):
+            new_stem = '%s_%d' % (stem, i)
+            i += 1
+
+        # 되돌리기(undo)를 위해 (옮긴 위치, 원래 위치) 기록 — 이미지가 첫 항목.
+        moves = []
+
+        def _rollback():
+            # 이미 옮긴 파일들(이미지+라벨)을 원위치로 되돌린다.
+            # 전부 성공하면 True, 하나라도 되돌리지 못하면 False(=부분 잔존).
+            ok = True
+            for moved_dest, moved_src in reversed(moves):
+                if os.path.isfile(moved_dest):
+                    try:
+                        os.makedirs(os.path.dirname(moved_src), exist_ok=True)
+                        shutil.move(moved_dest, moved_src)
+                    except Exception:
+                        ok = False
+            return ok
+
+        # 이미지 이동
+        dest_image = os.path.join(dest_dir, new_stem + img_ext)
+        try:
+            shutil.move(src_image, dest_image)
+        except Exception as e:
+            self.status('Move failed: %s' % e)
+            # 크로스-FS copy 중단 등이 남긴 부분 파일 제거(라벨 실패 경로와 대칭)
+            if os.path.isfile(dest_image):
+                try:
+                    os.remove(dest_image)
+                except OSError:
+                    pass
+            _cleanup_dest_dir()
+            return
+        moves.append((dest_image, src_image))
+
+        # 대응 라벨 파일(.xml/.txt/.json) 함께 이동 — 같은 new_stem으로 짝 유지.
+        # 라벨 이동이 하나라도 실패하면 이미 옮긴 이미지/라벨을 모두 되돌려(원자성)
+        # 이미지만 옮겨지고 라벨이 원래 폴더에 남는 어긋남을 방지한다.
+        image_dir = os.path.dirname(src_image)
+        for ext in (XML_EXT, TXT_EXT, JSON_EXT):
+            # default_save_dir 우선, 없으면 이미지 옆에서도 찾는다 — 하위 폴더까지
+            # 재귀 스캔된 이미지는 라벨이 이미지 옆에만 있을 수 있다.
+            label_src = next((p for p in (os.path.join(label_dir, stem + ext),
+                                          os.path.join(image_dir, stem + ext))
+                              if os.path.isfile(p)), None)
+            if label_src:
+                dest_label = os.path.join(dest_dir, new_stem + ext)
+                try:
+                    shutil.move(label_src, dest_label)
+                    moves.append((dest_label, label_src))
+                except Exception as e:
+                    # 실패한 이동이 대상에 남겼을 수 있는 부분 파일 제거(크로스-FS copy 중단 등)
+                    if os.path.isfile(dest_label):
+                        try:
+                            os.remove(dest_label)
+                        except OSError:
+                            pass
+                    reverted = _rollback()
+                    _cleanup_dest_dir()
+                    if reverted:
+                        message = ('Could not move label "%s": %s\n'
+                                   'Reverted — image and labels were left in place.'
+                                   % (os.path.basename(label_src), e))
+                    else:
+                        message = ('Could not move label "%s": %s\n'
+                                   'Revert also failed — some files may remain in "%s". '
+                                   'Please check before continuing.'
+                                   % (os.path.basename(label_src), e, dest_dir))
+                    self.error_message('Classify failed', message)
+                    return
+
+        self.classify_history.append(moves)
+        if len(moves) > 1:
+            self.status('Moved to %s  (Ctrl+Z to undo)' % dest_dir)
+        else:
+            self.status('Moved to %s — no label file found to move (Ctrl+Z to undo)' % dest_dir)
+
+        # 목록 새로고침 + 다음 이미지 (delete_image 패턴)
+        self.import_dir_images(self.last_open_dir)
+        if self.img_count > 0:
+            self.cur_img_idx = min(idx, self.img_count - 1)
+            self.load_file(self.m_img_list[self.cur_img_idx])
+        else:
+            self.close_file()
+
+    def undo_classify(self, _value=False):
+        """가장 최근 good/bad 분류 이동을 취소하고 파일들을 원위치로 되돌린다."""
+        if not self.classify_history:
+            self.status('Nothing to undo.')
+            return
+
+        moves = self.classify_history.pop()
+        for dest_path, original_path in moves:
+            if os.path.isfile(dest_path):
+                try:
+                    os.makedirs(os.path.dirname(original_path), exist_ok=True)
+                    shutil.move(dest_path, original_path)
+                except Exception as e:
+                    # 부분 복원 상태일 수 있으므로 남은 기록은 되돌려 보관(재시도 시 self-heal).
+                    # 이미 복원된 항목은 다음 undo에서 isfile 가드로 건너뛴다.
+                    self.classify_history.append(moves)
+                    if self.last_open_dir:
+                        self.import_dir_images(self.last_open_dir)
+                    self.error_message(
+                        'Undo failed',
+                        'Could not fully restore: %s\n'
+                        'Some files may be partially restored — retry undo (Ctrl+Z) '
+                        'or check the _good/_bad folders.' % e)
+                    return
+
+        # 첫 항목이 이미지 — 복원 후 그 이미지를 다시 표시한다.
+        image_original = moves[0][1] if moves else None
+        self.status('Undo: restored %s' %
+                    (os.path.basename(image_original) if image_original else ''))
+
+        if self.last_open_dir:
+            self.import_dir_images(self.last_open_dir)
+            if image_original and image_original in self.m_img_list:
+                self.cur_img_idx = self.m_img_list.index(image_original)
+                self.load_file(image_original)
+            elif self.img_count > 0:
+                self.cur_img_idx = min(self.cur_img_idx, self.img_count - 1)
+                self.load_file(self.m_img_list[self.cur_img_idx])
+
     def reset_all(self):
         self.settings.reset()
         self.close()
@@ -1616,6 +1832,60 @@ class MainWindow(QMainWindow, WindowMixin):
                     else:
                         self.label_hist.append(line)
 
+    def get_persistent_classes_file(self, bundled_default):
+        # Return a writable, persistent predefined_classes.txt path.
+        # Frozen (exe): next to the executable so edits survive restart.
+        if getattr(sys, 'frozen', False):
+            target = os.path.join(os.path.dirname(sys.executable), 'predefined_classes.txt')
+        else:
+            target = bundled_default
+        try:
+            if target and not os.path.exists(target):
+                if bundled_default and os.path.exists(bundled_default):
+                    import shutil
+                    shutil.copyfile(bundled_default, target)
+                else:
+                    with codecs.open(target, 'w', 'utf8') as f:
+                        f.write('person\n')
+        except Exception as e:
+            print('predefined classes bootstrap failed:', e)
+            return bundled_default
+        return target
+
+    def edit_default_classes(self):
+        current = "\n".join(self.label_hist)
+        text, ok = QInputDialog.getMultiLineText(
+            self, 'Edit Default Classes',
+            'One class per line. Saved permanently; used when drawing new boxes (W).',
+            current)
+        if not ok:
+            return
+        classes = [c.strip() for c in text.splitlines() if c.strip()]
+        if not classes:
+            return
+        try:
+            with codecs.open(self.predefined_classes_file, 'w', 'utf8') as f:
+                f.write("\n".join(classes) + "\n")
+        except Exception as e:
+            self.error_message('Error', 'Failed to save classes: %s' % e)
+            return
+        self.reload_predefined_classes(classes)
+
+    def reload_predefined_classes(self, classes):
+        self.label_hist = list(classes)
+        if self.label_hist:
+            self.default_label = self.label_hist[0]
+        # refresh the new-box label dialog (W key)
+        self.label_dialog = LabelDialog(parent=self, list_item=self.label_hist)
+        # refresh the "use default label" combo box
+        try:
+            self.default_label_combo_box.cb.blockSignals(True)
+            self.default_label_combo_box.cb.clear()
+            self.default_label_combo_box.cb.addItems(self.label_hist)
+            self.default_label_combo_box.cb.blockSignals(False)
+        except Exception:
+            pass
+
     def load_pascal_xml_by_filename(self, xml_path):
         if self.file_path is None:
             return
@@ -1656,6 +1926,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.verified = create_ml_parse_reader.verified
 
     def copy_previous_bounding_boxes(self):
+        # Guard: a standalone image (Open File) isn't in m_img_list; list.index would ValueError.
+        if not self.m_img_list or self.file_path not in self.m_img_list:
+            return
         current_index = self.m_img_list.index(self.file_path)
         if current_index - 1 >= 0:
             prev_file_path = self.m_img_list[current_index - 1]

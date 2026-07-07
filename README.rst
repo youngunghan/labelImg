@@ -49,11 +49,16 @@ Get from PyPI but only python3.0 or above
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 This is the simplest (one-command) install method on modern Linux distributions such as Ubuntu and Fedora.
 
+Note: the PyPI package is the upstream labelImg and does NOT include this
+fork's additions (g/b classify, Ctrl+Z undo classify, Ctrl+Shift+E class
+editing, Ctrl+Shift+C single-class-mode shortcut). To use this fork, build
+from source in this repository instead.
+
 .. code:: shell
 
     pip3 install labelImg
     labelImg
-    labelImg [IMAGE_PATH] [PRE-DEFINED CLASS FILE]
+    labelImg [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 
 
 Build from source
@@ -76,7 +81,7 @@ Python 3 + Qt5
     sudo pip3 install -r requirements/requirements-linux-python3.txt
     make qt5py3
     python3 labelImg.py
-    python3 labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE]
+    python3 labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 
 macOS
 ^^^^^
@@ -94,7 +99,7 @@ Python 3 + Qt5
 
     make qt5py3
     python3 labelImg.py
-    python3 labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE]
+    python3 labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 
 
 Python 3 Virtualenv (Recommended)
@@ -128,7 +133,7 @@ Open cmd and go to the `labelImg <#labelimg>`__ directory
     For pyqt5, pyrcc5 -o libs/resources.py resources.qrc
 
     python labelImg.py
-    python labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE]
+    python labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 
 If you want to package it into a separate EXE file
 
@@ -152,7 +157,7 @@ Open the Anaconda Prompt and go to the `labelImg <#labelimg>`__ directory
     conda install -c anaconda lxml
     pyrcc5 -o libs/resources.py resources.qrc
     python labelImg.py
-    python labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE]
+    python labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 
 Use Docker
 ~~~~~~~~~~~~~~~~~
@@ -174,6 +179,9 @@ Use Docker
 
 You can pull the image which has all of the installed and required dependencies. `Watch a demo video <https://youtu.be/nw1GexJzbCI>`__
 
+Note: the ``py2qt4`` image runs Python 2 + Qt4; this fork's classify (g/b)
+feature requires Python 3 and is not supported there.
+
 
 Usage
 -----
@@ -182,14 +190,20 @@ Steps (PascalVOC)
 ~~~~~~~~~~~~~~~~~
 
 1. Build and launch using the instructions above.
-2. Click 'Change default saved annotation folder' in Menu/File
-3. Click 'Open Dir'
+2. Click 'Open Dir'. The annotation save folder is automatically set to
+   the opened image folder.
+3. (Optional) Click 'Change default saved annotation folder' in Menu/File
+   to save annotations elsewhere. Do this *after* 'Open Dir' — opening a
+   directory always resets the save folder to that directory. Exception:
+   a save dir passed on the command line (3rd argument) is kept when the
+   image dir is opened at startup.
 4. Click 'Create RectBox'
 5. Click and release left mouse to select a region to annotate the rect
    box
 6. You can use right mouse to drag the rect box to copy or move it
 
-The annotation will be saved to the folder you specify.
+The annotation will be saved to the folder you specify (by default, next
+to the images).
 
 You can refer to the below hotkeys to speed up your workflow.
 
@@ -221,6 +235,13 @@ You can edit the
 `data/predefined\_classes.txt <https://github.com/tzutalin/labelImg/blob/master/data/predefined_classes.txt>`__
 to load pre-defined classes
 
+In this fork you can also edit the class list in-app via File > Edit Default
+Classes (Ctrl+Shift+E); changes are saved permanently. When running from
+source they are written back to ``data/predefined_classes.txt`` (or to the
+class file passed as the 2nd command-line argument, if given); when running
+the packaged exe, the list is stored in ``predefined_classes.txt`` next to the
+executable.
+
 Annotation visualization
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -243,6 +264,11 @@ Hotkeys
 +--------------------+--------------------------------------------+
 | Ctrl + s           | Save                                       |
 +--------------------+--------------------------------------------+
+| Ctrl + Shift + s   | Save As                                    |
++--------------------+--------------------------------------------+
+| Ctrl + Shift + c   | Toggle single class mode                   |
+|                    | (changed from Ctrl+Shift+S in this fork)   |
++--------------------+--------------------------------------------+
 | Ctrl + d           | Copy the current label and rect box        |
 +--------------------+--------------------------------------------+
 | Ctrl + Shift + d   | Delete the current image                   |
@@ -263,6 +289,19 @@ Hotkeys
 +--------------------+--------------------------------------------+
 | ↑→↓←               | Keyboard arrows to move selected rect box  |
 +--------------------+--------------------------------------------+
+| g                  | Move image + label to <folder>_good (fork) |
++--------------------+--------------------------------------------+
+| b                  | Move image + label to <folder>_bad (fork)  |
++--------------------+--------------------------------------------+
+| Ctrl + z           | Undo the last good/bad classify (fork)     |
++--------------------+--------------------------------------------+
+| Ctrl + Shift + e   | Edit default classes in-app (fork)         |
++--------------------+--------------------------------------------+
+
+g / b / Ctrl+Z are fork-specific classify hotkeys: the current image and its
+label file (.xml / .txt / .json) are moved to a sibling ``<folder>_good`` /
+``<folder>_bad`` directory, then the next image is loaded; Ctrl+Z undoes the
+last move.
 
 **Verify Image:**
 

@@ -183,20 +183,21 @@ if __name__ == "__main__":
             # Process the files
 
         for class_type_dir in os.listdir(dir_name):
+            class_dir = f"{dir_name}/{class_type_dir}"
 
             # Check whether is dir
-            if not os.path.isdir(dir_name):
+            if not os.path.isdir(class_dir):
                 continue
 
             prefix = f"{ori_prefix}/{class_type_dir}"
 
             # Convert the chosen extension to csv
             if args["mode"] == "txt":
-                res.extend(txt2csv(f"{dir_name}/{class_type_dir}",
+                res.extend(txt2csv(class_dir,
                                    training_type_dir,
                                    prefix))
             elif args["mode"] == "xml":
-                res.extend(xml2csv(f"{dir_name}/{class_type_dir}",
+                res.extend(xml2csv(class_dir,
                                    training_type_dir,
                                    prefix))
             else:
