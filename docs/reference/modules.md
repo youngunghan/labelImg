@@ -2,16 +2,16 @@
 
 파일별 핵심 클래스/함수. 라인 번호는 현재 저장소(`D:\labelImg`) 기준이다.
 
-## `labelImg.py` (1995줄) — 앱 본체
+## `labelImg.py` (2009줄) — 앱 본체
 
 | 심볼 | 위치 | 역할 |
 |---|---|---|
 | `WindowMixin` | `:54` | `QMainWindow`에 `menu()`/`toolbar()` 생성 헬퍼 믹스인 |
 | `MainWindow` | `:73` | 앱 컨트롤러(God-object). `QMainWindow`+`WindowMixin` 다중상속 |
-| `inverted(color)` | `:1942` | RGB 반전 `QColor` |
-| `read(filename, default)` | `:1946` | `QImageReader`(autoTransform=EXIF 회전)로 `QImage` 읽기 |
-| `get_main_app(argv)` | `:1958` | `QApplication`+argparse(image_dir/class_file/save_dir)+`MainWindow` |
-| `main()` | `:1989` | 엔트리포인트(`get_main_app` → `exec_`) |
+| `inverted(color)` | `:1955` | RGB 반전 `QColor` |
+| `read(filename, default)` | `:1959` | `QImageReader`(autoTransform=EXIF 회전)로 `QImage` 읽기 |
+| `get_main_app(argv)` | `:1968` | `QApplication`(기존 인스턴스 재사용)+argparse(image_dir/class_file/save_dir)+`MainWindow` |
+| `main()` | `:2003` | 엔트리포인트(`get_main_app` → `exec_`) |
 
 `MainWindow` 주요 메서드:
 
@@ -33,7 +33,7 @@
 | `save_file` / `save_file_as` | `:1503` / `:1518` | 저장 경로 결정 → `save_labels` |
 | `classify_current_image` / `undo_classify` | `:1569` / `:1710` | (로컬 확장) g/b 단축키로 현재 이미지+라벨(.xml/.txt/.json)을 형제 폴더 `<폴더>_good`/`<폴더>_bad`로 이동 후 다음 이미지 표시, Ctrl+Z로 직전 분류 원복. 라벨은 `default_save_dir` 우선, 없으면 이미지 옆에서 탐색(라벨 없이 이미지만 이동되면 상태바 경고). 내부 헬퍼 `_cleanup_dest_dir` `:1601` / `_taken` `:1618` / `_rollback` `:1631` |
 | `get_persistent_classes_file` / `edit_default_classes` / `reload_predefined_classes` | `:1835` / `:1855` / `:1874` | (로컬 확장) `predefined_classes.txt` 영속 경로 결정(frozen exe면 exe 옆 파일, 없으면 번들 기본으로 부트스트랩) · Edit Default Classes 다이얼로그(Ctrl+Shift+E, 저장 후 리로드) · 클래스 목록 리로드(`label_hist`·`default_label`·`LabelDialog`·기본라벨 콤보 갱신) |
-| `load_pascal_xml_by_filename` / `load_yolo_txt_by_filename` / `load_create_ml_json_by_filename` | `:1889` / `:1902` / `:1915` | 각 Reader 인스턴스화 → `load_labels` |
+| `load_pascal_xml_by_filename` / `load_yolo_txt_by_filename` / `load_create_ml_json_by_filename` | `:1889` / `:1902` / `:1925` | 각 Reader 인스턴스화 → `load_labels`. YOLO는 로드 실패(`YoloParseError` 등)를 에러 대화상자로 처리하고 불량 라인 수를 상태바에 표시(`:1908-1920`) |
 | `closeEvent` | `:1269` | 모든 `SETTING_*` 키 기록 후 `Settings.save()` |
 
 주의: 소스가 수정되면 (특히 후반부) 라인 번호가 밀릴 수 있다 — 정확한 위치는 심볼명 검색으로 재확인한다.
@@ -69,7 +69,7 @@
 | 파일 | 클래스 | 위치 |
 |---|---|---|
 | `libs/pascal_voc_io.py` (171줄) | `PascalVocWriter` / `PascalVocReader` | `:15` / `:127` |
-| `libs/yolo_io.py` (143줄) | `YOLOWriter` / `YoloReader` | `:11` / `:81` |
+| `libs/yolo_io.py` (171줄) | `YoloParseError` / `YOLOWriter` / `YoloReader` | `:12` / `:16` / `:86` |
 | `libs/create_ml_io.py` (135줄) | `CreateMLWriter` / `CreateMLReader` | `:13` / `:96` |
 
 상세 포맷 → [formats.md](formats.md).
@@ -106,4 +106,4 @@
 | `setup.py` | PyPI 패키징. deps `pyqt5`,`lxml`, 진입점 `labelImg.labelImg:main` |
 | `resources.qrc` | 아이콘 + `strings*.properties`(en/zh-TW/zh-CN/ja-JP) 매니페스트 |
 | `libs/__init__.py` | 버전 `1.8.6` |
-| `tests/` | `test_io`·`test_settings`·`test_stringBundle`·`test_utils`·`test_qt` |
+| `tests/` | `test_io`·`test_settings`·`test_stringBundle`·`test_utils`·`test_qt`·`test_classify`(분류 원자성/롤백/undo)·`test_yolo_reader`(YOLO 견고성) |

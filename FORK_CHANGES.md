@@ -7,12 +7,13 @@
 
 | Metric | Value |
 |---|---|
-| Diff vs upstream | 26 files, **+1,637 / −46** |
-| Core app (`labelImg.py`) | +288 / −15 (16 hunks) |
+| Diff vs upstream | 32 files, **+2,098 / −71** |
+| Core app (`labelImg.py`) | +306 / −19 |
 | New documentation | `docs/` tree: 18 files, ~1,200 lines (Diátaxis: tutorials / how-to / reference / explanation) |
 | Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`) |
-| Tests | 10/10 passing; suite made environment-independent (ran only with `LC_ALL`/`LANG` set before) |
-| Upstream bugs fixed | 3 crash / silent-failure bugs |
+| Tests | **18/18 passing** — 8 fork tests added (atomic-move rollback via fault injection, undo, YOLO robustness); suite made environment-independent |
+| Upstream bugs fixed | 4 crash / silent-failure defects (see table) |
+| CI | GitHub Actions: test matrix (Linux/Windows × Py3.9/3.12, headless Qt) + ruff critical-rules lint |
 
 ## Features added
 
@@ -56,6 +57,7 @@ Single Class Mode moved from `Ctrl+Shift+S` — which upstream double-bound to
 | 1 | `tools/label_to_csv.py` crashes with `NotADirectoryError` when a stray file sits in a set folder | inner loop's `isdir` check re-tested the **parent** dir (always true) instead of the child | test the child path; stray files are skipped |
 | 2 | *Copy Previous Bounding Boxes* crashes with `ValueError` on a standalone (Open File) image | unguarded `m_img_list.index(file_path)` | membership guard, quiet no-op |
 | 3 | Saving with an unsupported format silently did nothing | `else` branch called the commented-out `LabelFile.save` → would `AttributeError` | raise `LabelFileError`, caught by the existing handler → clear error dialog |
+| 4 | Opening a YOLO folder crashed on a missing `classes.txt`, a malformed line, or an out-of-range class index | `YoloReader` had no error handling (`try/except` left commented out) | clear error dialog (`YoloParseError`), malformed lines skipped and counted, status-bar notice |
 
 ## Documentation added
 
@@ -73,10 +75,9 @@ Effort: **S** small / **M** medium / **L** large.
 
 ### Robustness
 
-1. **[M] YOLO reader crash-safety** — `YoloReader` has no error handling
-   (`libs/yolo_io.py:97-139`): a missing `classes.txt`, a blank/malformed line, or an
-   out-of-range class index crashes the app while opening a folder. Promote to a clear
-   error dialog + skip bad lines.
+1. ~~**[M] YOLO reader crash-safety**~~ — **done (2026-07-07)**: missing `classes.txt`
+   raises `YoloParseError` → error dialog; malformed lines are skipped and counted
+   (`libs/yolo_io.py:104-168`, `labelImg.py:1908-1920`), with regression tests.
 2. **[S] Consistent text encodings** — annotation `.txt` is written UTF-8 but
    `classes.txt` and CreateML JSON are read/written with the OS locale encoding
    (`yolo_io.py`, `create_ml_io.py`) → mojibake/crashes for non-ASCII labels on Windows (cp949).
@@ -109,17 +110,20 @@ Effort: **S** small / **M** medium / **L** large.
 
 ### Engineering
 
-14. **[M] CI** — no working automation: the inherited packaging workflow uses the
-    discontinued `upload-artifact@v3` and would fail if enabled. Add a test+lint matrix
-    (Linux/Windows × Python versions, headless Qt) and fix or drop the packaging jobs.
-15. **[M] Tests for the fork features** — pytest-qt regression tests for classify/undo,
-    including a fault-injection test (label move raises mid-batch → full rollback) that
-    proves the atomicity claim.
+14. ~~**[M] CI**~~ — **done (2026-07-07)**: `ci.yml` runs the test suite on
+    Linux/Windows × Python 3.9/3.12 (offscreen Qt) plus a ruff critical-rules lint;
+    the inherited packaging workflow is bumped to `upload-artifact@v4` and moved to
+    manual dispatch.
+15. ~~**[M] Tests for the fork features**~~ — **done (2026-07-07)**: `tests/test_classify.py`
+    drives a real `MainWindow` (CLI dir import, move+advance, collision rename,
+    fault-injected rollback, undo) and `tests/test_yolo_reader.py` covers the YOLO
+    hardening; plain `unittest`, no new test dependency.
 16. **[M] Release automation** — build the Windows exe from `labelImg.spec` on tag push
     and attach it to the GitHub Release; move packaging to `pyproject.toml` under a
     distinct distribution name.
 17. **[M] Remove Python 2 / PyQt4 remnants** — dead import fallbacks in 15 files, no-op
     `ustr()` wrappers, `qt4py2` build paths; unblocks ruff/type-checking.
-18. **[S] Demo GIF in README** — the selling point is interaction; also re-point badges
-    and demo images that still hot-link the upstream repo.
+18. **[S] Demo GIF in README** — the selling point is interaction; demo images still
+    hot-link the upstream repo. (Badge part done 2026-07-07: the dead upstream workflow
+    badge now points at this fork's CI.)
 19. **[L] Qt6 migration (PySide6)** — after tests and dead-code removal land.

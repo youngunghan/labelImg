@@ -47,7 +47,7 @@ python labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 
 > `make qt5py3`이 하는 일은 한 줄이다(`Makefile:23-24`): `pyrcc5 -o libs/resources.py resources.qrc`. 이 `libs/resources.py`(약 654KB 자동생성)가 없으면 아이콘·문자열 로딩이 실패한다.
 
-> 위치 인자 3개는 모두 선택적이다(`labelImg.py`의 `get_main_app`, 1967-1971행): ① `IMAGE_PATH` — 이미지 폴더 또는 단일 이미지 파일, ② `PRE-DEFINED CLASS FILE` — 클래스 목록 파일(기본 `data/predefined_classes.txt`), ③ `SAVE_DIR` — 어노테이션 저장 폴더. `IMAGE_PATH`가 폴더여도 `SAVE_DIR`는 유효하다 — 시작 시 `open_dir_dialog(silent=True)`가 명령줄 `save_dir`를 `default_save_dir`로 유지한다(`labelImg.py:1394-1395`). 단, 실행 후 메뉴의 Open Dir로 폴더를 열면 `default_save_dir`가 그 폴더로 재설정되므로, 저장 폴더를 따로 쓰려면 Open Dir **이후에** Change Save Dir를 실행해야 한다.
+> 위치 인자 3개는 모두 선택적이다(`labelImg.py`의 `get_main_app`, 1983-1988행): ① `IMAGE_PATH` — 이미지 폴더 또는 단일 이미지 파일, ② `PRE-DEFINED CLASS FILE` — 클래스 목록 파일(기본 `data/predefined_classes.txt`), ③ `SAVE_DIR` — 어노테이션 저장 폴더. `IMAGE_PATH`가 폴더여도 `SAVE_DIR`는 유효하다 — 시작 시 `open_dir_dialog(silent=True)`가 명령줄 `save_dir`를 `default_save_dir`로 유지한다(`labelImg.py:1394-1395`). 단, 실행 후 메뉴의 Open Dir로 폴더를 열면 `default_save_dir`가 그 폴더로 재설정되므로, 저장 폴더를 따로 쓰려면 Open Dir **이후에** Change Save Dir를 실행해야 한다.
 
 ## C. 빌드 타겟(Makefile)
 
@@ -78,7 +78,7 @@ pyinstaller --hidden-import=pyqt5 --hidden-import=lxml -F -n "labelImg" -c label
 python -m unittest discover tests      # 또는 make testpy3
 ```
 
-테스트 범위: `test_io`(VOC/CreateML 라운드트립)·`test_settings`(설정 영속화)·`test_stringBundle`(i18n 폴백)·`test_utils`(색상/정렬)·`test_qt`(앱 부팅). GUI 상호작용은 부팅 noop 수준이다.
+테스트 범위: `test_io`(VOC/CreateML 라운드트립)·`test_settings`(설정 영속화)·`test_stringBundle`(i18n 폴백)·`test_utils`(색상/정렬)·`test_qt`(앱 부팅)·`test_classify`(포크 분류의 원자적 이동·실패 주입 롤백·undo — 실제 `MainWindow` 구동)·`test_yolo_reader`(YOLO 견고성: classes.txt 부재·불량 라인). 총 18개.
 
 > ℹ️ `test_stringBundle`은 로케일 환경변수를 `os.environ.get()`으로 안전 조회하도록 고쳐져, `LC_ALL`/`LANG`이 없는 Windows PowerShell/cmd에서도 그대로 통과한다(`tests/test_stringBundle.py`). 별도 환경변수 설정이 필요 없다.
 > `test_io`가 실행 중 `tests/tests.json`(`tests/test_io.py:49`)과 `tests/test.xml`(`tests/test_io.py:19`)을 만든다. 두 산출물 모두 `tests/.gitignore`에 등록돼 작업트리를 더럽히지 않는다.

@@ -98,4 +98,4 @@ Canvas는 윈도우에 **7개 시그널**로 보고한다(`libs/canvas.py:24-31`
 
 ## 진입점
 
-`main()`(`labelImg.py:1989`) → `get_main_app()`(`labelImg.py:1958`)가 `QApplication`을 만들고 `argparse`로 `image_dir`/`class_file`/`save_dir`를 파싱한 뒤 `MainWindow`를 생성·`show()`한다. 콘솔 스크립트 진입점은 `setup.py`의 `labelImg=labelImg.labelImg:main`. 단, `class_file` 인자는 그대로 사용되지 않고 `MainWindow.__init__`(`labelImg.py:119`)에서 `get_persistent_classes_file`을 거친다 — frozen exe에서는 exe 옆 영속 사본으로 대체되고, 소스 실행에서는 인자 경로가 영속 파일로 사용되며 부재 시 자동 생성된다.
+`main()`(`labelImg.py:2003`) → `get_main_app()`(`labelImg.py:1968`)가 `QApplication`을 만들고(이미 살아 있는 인스턴스가 있으면 재사용 — 테스트에서 여러 번 호출 가능) `argparse`로 `image_dir`/`class_file`/`save_dir`를 파싱한 뒤 `MainWindow`를 생성·`show()`한다. 콘솔 스크립트 진입점은 `setup.py`의 `labelImg=labelImg.labelImg:main`. 단, `class_file` 인자는 그대로 사용되지 않고 `MainWindow.__init__`(`labelImg.py:119`)에서 `get_persistent_classes_file`을 거친다 — frozen exe에서는 exe 옆 영속 사본으로 대체되고, 소스 실행에서는 인자 경로가 영속 파일로 사용되며 부재 시 자동 생성된다.

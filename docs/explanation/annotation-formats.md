@@ -28,9 +28,9 @@ labelImg는 같은 화면 작업 결과를 **세 가지 포맷**으로 저장할
 
 ### YOLO — 학습기 친화적 정규화 txt + classes.txt
 
-한 줄에 박스 하나: `class_index cx cy w h`, 형식은 `"%d %.6f %.6f %.6f %.6f"`(`libs/yolo_io.py:69`). 모두 이미지 크기로 나눈 0~1 정규화 값이다. 클래스 이름 대신 **인덱스**를 쓰므로, 같은 폴더에 `classes.txt`(한 줄당 클래스명, 줄 번호 = 인덱스)를 함께 저장한다. 저장 시 새 라벨은 `class_list`에 append되며 그 인덱스가 부여된다(`libs/yolo_io.py:42-45`).
+한 줄에 박스 하나: `class_index cx cy w h`, 형식은 `"%d %.6f %.6f %.6f %.6f"`(`libs/yolo_io.py:74`). 모두 이미지 크기로 나눈 0~1 정규화 값이다. 클래스 이름 대신 **인덱스**를 쓰므로, 같은 폴더에 `classes.txt`(한 줄당 클래스명, 줄 번호 = 인덱스)를 함께 저장한다. 저장 시 새 라벨은 `class_list`에 append되며 그 인덱스가 부여된다(`libs/yolo_io.py:47-50`).
 
-> **difficult 손실**: YOLO 라인엔 difficult가 없다. 읽을 때 항상 `False`로 들어온다(`libs/yolo_io.py:142-143`). VOC로 difficult를 단 박스를 YOLO로 저장 후 다시 읽으면 difficult가 사라진다.
+> **difficult 손실**: YOLO 라인엔 difficult가 없다. 읽을 때 항상 `False`로 들어온다(`libs/yolo_io.py:170-171`). VOC로 difficult를 단 박스를 YOLO로 저장 후 다시 읽으면 difficult가 사라진다.
 > **classes.txt 함정**: 이미지 묶음을 처리하는 도중 라벨 목록을 바꾸면 안 된다. `classes.txt`는 저장 때마다 갱신되지만 **이전에 저장한 라벨 파일의 인덱스는 갱신되지 않아** 매핑이 어긋날 수 있다(루트 README).
 
 ### CreateML — 리스트형 JSON
@@ -45,13 +45,13 @@ labelImg는 같은 화면 작업 결과를 **세 가지 포맷**으로 저장할
 
 세 Reader는 모두 **같은 5-튜플** `(label, points, line_color, fill_color, difficult)`을 반환한다(주석으로 명시, 예: `libs/pascal_voc_io.py:130-131`). 색 두 자리는 `None`이라 색 결정은 상위(MainWindow/Shape 기본색·`generate_color_by_text`)에 위임된다. `points`는 `[(xmin,ymin),(xmax,ymin),(xmax,ymax),(xmin,ymax)]` 시계방향 4코너로 통일돼, MainWindow의 라벨 로드 경로가 포맷과 무관하게 동작한다.
 
-writer 인터페이스는 완전히 대칭이 아니다. `PascalVocWriter`와 `YOLOWriter`는 `add_bnd_box(x_min, y_min, x_max, y_max, name, difficult)`로 박스를 모은 뒤 `save()`로 직렬화하며, YOLO의 `save()`만 `class_list` 추가 인자를 받는다(`libs/yolo_io.py:49`). 반면 `CreateMLWriter`는 `add_bnd_box`가 없다 — 생성자에서 `shapes` 리스트를 통째로 받아(`libs/create_ml_io.py:14`) `write()`(`libs/create_ml_io.py:25`)로 직렬화하고, `class_list`는 받지 않는다(`LabelFile.save_create_ml_format`이 인자로 받지만 writer에 전달하지 않음, `libs/labelFile.py:39-51`).
+writer 인터페이스는 완전히 대칭이 아니다. `PascalVocWriter`와 `YOLOWriter`는 `add_bnd_box(x_min, y_min, x_max, y_max, name, difficult)`로 박스를 모은 뒤 `save()`로 직렬화하며, YOLO의 `save()`만 `class_list` 추가 인자를 받는다(`libs/yolo_io.py:54`). 반면 `CreateMLWriter`는 `add_bnd_box`가 없다 — 생성자에서 `shapes` 리스트를 통째로 받아(`libs/create_ml_io.py:14`) `write()`(`libs/create_ml_io.py:25`)로 직렬화하고, `class_list`는 받지 않는다(`LabelFile.save_create_ml_format`이 인자로 받지만 writer에 전달하지 않음, `libs/labelFile.py:39-51`).
 
 ## 설계상 함정 / 비대칭 (요약)
 
 - **difficult 비대칭**: VOC만 difficult를 온전히 라운드트립한다. YOLO는 폐기, CreateML reader는 모든 박스를 `difficult=True`로 로드한다(`libs/create_ml_io.py:132` — 의도와 다를 수 있는 동작).
 - **색상은 VOC에도 안 들어간다**: `format_shape`는 색을 직렬화하지만 어떤 writer도 색을 기록하지 않는다 — 색은 화면 표시용일 뿐 라벨 파일엔 없다.
-- **Reader 실패 처리는 포맷마다 다름**: `PascalVocReader`는 `try/except: pass`로 **모든** 예외를 삼켜 그 시점까지 파싱된 shapes만 돌려준다(`libs/pascal_voc_io.py:135-138`) — 파일 수준 파싱 오류면 빈 리스트, object 순회 도중 실패면 부분 결과다(append가 순회 중 즉시 일어나므로, `libs/pascal_voc_io.py:163-170`). `CreateMLReader`는 **`ValueError`만** 잡아 "JSON decoding failed"를 출력하고(빈 결과), 그 외 예외(KeyError/IOError 등)는 전파한다(`libs/create_ml_io.py:102-105`). `YoloReader`는 예외를 전혀 잡지 않는다(생성자의 try/except가 주석 처리됨, `libs/yolo_io.py:108-111`) — `classes.txt` 부재(IOError), 라인 형식 오류, 범위 밖 클래스 인덱스(IndexError)가 모두 호출자로 전파된다.
+- **Reader 실패 처리는 포맷마다 다름**: `PascalVocReader`는 `try/except: pass`로 **모든** 예외를 삼켜 그 시점까지 파싱된 shapes만 돌려준다(`libs/pascal_voc_io.py:135-138`) — 파일 수준 파싱 오류면 빈 리스트, object 순회 도중 실패면 부분 결과다(append가 순회 중 즉시 일어나므로, `libs/pascal_voc_io.py:163-170`). `CreateMLReader`는 **`ValueError`만** 잡아 "JSON decoding failed"를 출력하고(빈 결과), 그 외 예외(KeyError/IOError 등)는 전파한다(`libs/create_ml_io.py:102-105`). `YoloReader`는 (포크 견고화 2026-07-07) `classes.txt` 부재 시 `YoloParseError`를 명시적으로 던지고(`libs/yolo_io.py:104-107`) 호출부가 에러 대화상자로 처리하며(`labelImg.py:1908-1917`), 불량 라인(NaN/inf 좌표 포함)은 건너뛰고 `skipped_lines`로 집계해 상태바에 알린다(`libs/yolo_io.py:147-168`) — 상류는 예외 처리가 전무해(try/except 주석 처리) 이 모든 경우에 앱이 크래시했다.
 - **CreateML verified는 보존된다**: `CreateMLWriter.__init__`은 `verified=False`로 시작하지만(`libs/create_ml_io.py:21`), 실제 저장 경로인 `LabelFile.save_create_ml_format`이 `writer.verified = self.verified`로 덮어쓴다(`libs/labelFile.py:49`; VOC/YOLO도 동일). 따라서 화면의 verified 상태가 그대로 기록된다. 단 reader 쪽은 비대칭이다 — `CreateMLReader.parse_json`은 verified를 현재 이미지와 매칭된 엔트리가 아니라 리스트 첫 엔트리에서 읽으므로(`libs/create_ml_io.py:115`), 여러 이미지가 누적된 JSON에서는 다른 이미지의 verified가 표시될 수 있다.
 
 관련: [../reference/formats.md](../reference/formats.md) · [architecture.md](architecture.md)

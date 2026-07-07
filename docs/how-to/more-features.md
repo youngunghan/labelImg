@@ -32,7 +32,7 @@
 
 ## 이전 이미지의 박스 복사 (`Ctrl+V`)
 
-`Copy Previous Bounding Boxes`(`copy_previous_bounding_boxes`, `labelImg.py:1928`)는 **바로 이전 이미지의 어노테이션을 현재 이미지에 그대로 올리고 즉시 저장**한다. 연속 프레임/영상 캡처처럼 객체 위치가 거의 같은 이미지를 빠르게 라벨링할 때 유용하다. **File 메뉴**에 등록돼 있다(`labelImg.py:453`). **`Open Dir`로 연 이미지 목록 안에서만 동작**한다(목록의 이전 이미지를 참조하므로) — `Open File`로 단독으로 연 파일에서는 조용히 무시된다(현재 파일이 `m_img_list`에 없으면 그대로 반환하는 가드, `labelImg.py:1930-1931`).
+`Copy Previous Bounding Boxes`(`copy_previous_bounding_boxes`, `labelImg.py:1938`)는 **바로 이전 이미지의 어노테이션을 현재 이미지에 그대로 올리고 즉시 저장**한다. 연속 프레임/영상 캡처처럼 객체 위치가 거의 같은 이미지를 빠르게 라벨링할 때 유용하다. **File 메뉴**에 등록돼 있다(`labelImg.py:453`). **`Open Dir`로 연 이미지 목록 안에서만 동작**한다(목록의 이전 이미지를 참조하므로) — `Open File`로 단독으로 연 파일에서는 조용히 무시된다(현재 파일이 `m_img_list`에 없으면 그대로 반환하는 가드, `labelImg.py:1940-1941`).
 
 ## 사전 정의 클래스 앱에서 편집 (`Ctrl+Shift+E`)
 

@@ -60,13 +60,13 @@
 <class_index> <x_center> <y_center> <width> <height>
 ```
 
-- 출력 포맷 `"%d %.6f %.6f %.6f %.6f\n"` (`yolo_io.py:69`).
+- 출력 포맷 `"%d %.6f %.6f %.6f %.6f\n"` (`yolo_io.py:74`).
 - 모두 **0~1 정규화**:
   - `x_center = (x_min + x_max) / 2 / img_size[1]`
   - `y_center = (y_min + y_max) / 2 / img_size[0]`
   - `w = (x_max - x_min) / img_size[1]`
-  - `h = (y_max - y_min) / img_size[0]` (`yolo_io.py:34-38`)
-- 역변환(읽기): `cx ± w/2`, `cy ± h/2`를 `[0,1]`로 클램프 후 너비·높이를 곱하고 `round` (`yolo_io.py:124-132`).
+  - `h = (y_max - y_min) / img_size[0]` (`yolo_io.py:39-43`)
+- 역변환(읽기): `cx ± w/2`, `cy ± h/2`를 `[0,1]`로 클램프 후 너비·높이를 곱하고 `round` (`yolo_io.py:135-143`).
 
 사이드카 `classes.txt` — 라벨 txt와 **같은 디렉터리**에 저장:
 
@@ -77,13 +77,13 @@ dog
 ```
 
 - 한 줄당 클래스명, **줄 번호(0부터) = `class_index`**.
-- 저장 시 처음 보는 라벨은 `class_list`에 append되어 인덱스를 부여받는다(`yolo_io.py:42-45`).
-- 읽기 시 `classes.txt`를 `strip('\n').split('\n')`로 로드해 `self.classes[int(class_index)]`로 라벨 조회(`yolo_io.py:98,122`).
+- 저장 시 처음 보는 라벨은 `class_list`에 append되어 인덱스를 부여받는다(`yolo_io.py:47-50`).
+- 읽기 시 `classes.txt`를 `strip('\n').split('\n')`로 로드해 `self.classes[int(class_index)]`로 라벨 조회(`yolo_io.py:109,133`).
 
 주의:
-- **difficult는 저장되지 않으며 읽을 때 항상 `False`** (`yolo_io.py:142-143`).
-- 라벨 txt는 저장 시 `DEFAULT_ENCODING`으로 열지만 `classes.txt`는 인코딩 지정 없이 열린다(`yolo_io.py:55-63`). 읽기 시에는 `classes.txt`(`yolo_io.py:97`)와 라벨 txt(`yolo_io.py:137`) 모두 인코딩 지정이 없다 → 비ASCII 클래스명은 플랫폼 간 불일치 가능.
-- `parse_yolo_format`은 `split(' ')`로 **정확히 단일 공백 5필드**를 기대한다(`yolo_io.py:139`).
+- **difficult는 저장되지 않으며 읽을 때 항상 `False`** (`yolo_io.py:170-171`).
+- 라벨 txt는 저장 시 `DEFAULT_ENCODING`으로 열지만 `classes.txt`는 인코딩 지정 없이 열린다(`yolo_io.py:60-68`). 읽기 시에는 `classes.txt`(`yolo_io.py:108`)와 라벨 txt(`yolo_io.py:148`) 모두 인코딩 지정이 없다 → 비ASCII 클래스명은 플랫폼 간 불일치 가능.
+- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:147-168`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:1908-1917`).
 
 ---
 
