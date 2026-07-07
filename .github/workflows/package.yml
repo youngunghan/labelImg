@@ -1,5 +1,9 @@
 name: Package
-on: [push, pull_request]
+# Manual trigger only: this inherited workflow is not part of CI (the fork
+# builds release binaries on demand; see FORK_CHANGES.md roadmap for release
+# automation). It previously ran on every push and failed hard once GitHub
+# discontinued upload/download-artifact v3 (2025-01-30).
+on: [workflow_dispatch]
 
 jobs:
   package-macos:
@@ -8,7 +12,7 @@ jobs:
       PIPENV_VENV_IN_PROJECT: 1
       PIPENV_IGNORE_VIRTUALENVS: 1
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Python Environment
         run: |
           pip3 install pipenv
@@ -26,14 +30,14 @@ jobs:
         run: |
           cd dist/
           tar czf labelImg.tgz labelImg.app
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: macOS artifact
           path: dist/labelImg.tgz
   package-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Python Environment
         run: |
           pip3 install pyinstaller pyqt5==5.15.6 lxml
@@ -43,14 +47,14 @@ jobs:
       - name: Package LabelImg
         run: |
           pyinstaller --hidden-import=pyqt5 --hidden-import=lxml -F -n "labelImg" -c labelImg.py -p ./libs -p ./
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: Windows artifact
           path: dist/labelImg.exe
   package-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Python Environment
         run: |
           pip3 install pyinstaller pyqt5==5.15.6 lxml
@@ -60,7 +64,7 @@ jobs:
       - name: Package LabelImg
         run: |
           pyinstaller --hidden-import=pyqt5 --hidden-import=lxml -F -n "labelImg" -c labelImg.py -p ./libs -p ./
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: Linux artifact
           path: dist/labelImg

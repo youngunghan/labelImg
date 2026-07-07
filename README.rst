@@ -15,8 +15,9 @@ About LabelImg
 .. image:: https://img.shields.io/pypi/v/labelimg.svg
         :target: https://pypi.python.org/pypi/labelimg
 
-.. image:: https://img.shields.io/github/workflow/status/tzutalin/labelImg/Package?style=for-the-badge
-        :alt: GitHub Workflow Status
+.. image:: https://github.com/youngunghan/labelImg/actions/workflows/ci.yml/badge.svg
+        :target: https://github.com/youngunghan/labelImg/actions/workflows/ci.yml
+        :alt: CI status
 
 .. image:: https://img.shields.io/badge/lang-en-blue.svg
         :target: https://github.com/tzutalin/labelImg
