@@ -42,6 +42,40 @@ by `ImageNet <http://www.image-net.org/>`__.  Besides, it also supports YOLO and
 
 `Watch a demo video <https://youtu.be/p0nR2YsCY_U>`__
 
+About this fork
+------------------
+
+This repository is a fork of `HumanSignal/labelImg <https://github.com/HumanSignal/labelImg>`__,
+which was archived in February 2024 (read-only) when LabelImg joined the Label
+Studio community. Changes can no longer be merged upstream, so this fork
+carries them independently.
+
+What this fork adds on top of upstream ``b33f965``:
+
+- **Good/Bad image triage** — press ``g``/``b`` to move the current image *and*
+  its label file into a ``<folder>_good`` / ``<folder>_bad`` sibling folder and
+  advance to the next image. Moves are atomic (rolled back if a label move
+  fails) and undoable with ``Ctrl+Z``.
+- **Edit Default Classes in-app** (``Ctrl+Shift+E``) — edit the predefined
+  class list from the File menu; changes persist (written back to the class
+  file, or stored next to the executable for the packaged exe).
+- **Command-line save dir respected at startup** —
+  ``labelImg.py <image_dir> [class_file] [save_dir]`` now prefers the folder
+  given on the command line over the remembered ``lastOpenDir``, so existing
+  labels are found where you expect.
+- **Single Class Mode moved to** ``Ctrl+Shift+C`` (upstream's ``Ctrl+Shift+S``
+  collided with Save As).
+- **Robustness fixes** — ``tools/label_to_csv.py`` no longer crashes when a
+  stray file sits in a set folder; Copy Previous Bounding Boxes no longer
+  crashes on a standalone (Open File) image; saving with an unsupported format
+  raises a clear error instead of an ``AttributeError``.
+- **Developer documentation** — a `docs/ <docs/README.md>`__ tree (Korean)
+  covering architecture, annotation formats, shortcuts and the fork features,
+  plus a PyInstaller ``labelImg.spec``.
+
+The PyPI package (``pip3 install labelImg``) is the upstream project and does
+not include these changes — build from source to use them.
+
 Installation
 ------------------
 
