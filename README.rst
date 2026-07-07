@@ -76,6 +76,11 @@ What this fork adds on top of upstream ``b33f965``:
 The PyPI package (``pip3 install labelImg``) is the upstream project and does
 not include these changes — build from source to use them.
 
+See `FORK_CHANGES.md <FORK_CHANGES.md>`__ for a change-by-change comparison
+against upstream (with numbers) and the improvement roadmap, and the
+`releases page <https://github.com/youngunghan/labelImg/releases>`__ for
+working snapshots.
+
 Installation
 ------------------
 
