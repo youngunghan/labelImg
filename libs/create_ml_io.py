@@ -24,7 +24,7 @@ class CreateMLWriter:
 
     def write(self):
         if os.path.isfile(self.output_file):
-            with open(self.output_file, "r") as file:
+            with open(self.output_file, "r", encoding=ENCODE_METHOD) as file:
                 input_data = file.read()
                 output_dict = json.loads(input_data)
         else:
@@ -105,19 +105,20 @@ class CreateMLReader:
             print("JSON decoding failed")
 
     def parse_json(self):
-        with open(self.json_path, "r") as file:
+        with open(self.json_path, "r", encoding=ENCODE_METHOD) as file:
             input_data = file.read()
 
         # Returns a list
         output_list = json.loads(input_data)
 
-        if output_list:
-            self.verified = output_list[0].get("verified", False)
-
+        # verified is stored per image entry — read it from the entry that
+        # matches this image, not from output_list[0] (a multi-image file
+        # would otherwise show another image's verified state).
         if len(self.shapes) > 0:
             self.shapes = []
         for image in output_list:
             if image["image"] == self.filename:
+                self.verified = image.get("verified", False)
                 for shape in image["annotations"]:
                     self.add_shape(shape["label"], shape["coordinates"])
 

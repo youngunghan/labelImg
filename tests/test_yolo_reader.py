@@ -71,6 +71,25 @@ class TestYoloReader(unittest.TestCase):
         self.assertEqual('person', reader.get_shapes()[0][0])
         self.assertEqual(8, reader.skipped_lines)
 
+    def test_bom_in_classes_txt_is_stripped(self):
+        # Windows Notepad writes a BOM; it must not leak into the first name.
+        with open(os.path.join(self.dir, 'classes.txt'), 'w', encoding='utf-8-sig') as f:
+            f.write('person\ncar\n')
+        txt = self.write('img.txt', '0 0.5 0.5 0.2 0.2\n')
+        reader = YoloReader(txt, self.image)
+        self.assertEqual('person', reader.get_shapes()[0][0])
+
+    def test_non_ascii_classes_read_as_utf8(self):
+        # classes.txt is written utf-8 by YOLOWriter; the reader must decode
+        # it as utf-8 too, independent of the OS locale (cp949 on Korean
+        # Windows used to mangle or reject these).
+        with open(os.path.join(self.dir, 'classes.txt'), 'w', encoding='utf-8') as f:
+            f.write('사람\n자동차\n')
+        txt = self.write('img.txt', '1 0.5 0.5 0.2 0.2\n')
+        reader = YoloReader(txt, self.image)
+        self.assertEqual('자동차', reader.get_shapes()[0][0])
+        self.assertEqual(0, reader.skipped_lines)
+
 
 if __name__ == '__main__':
     unittest.main()

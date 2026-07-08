@@ -60,12 +60,12 @@ class YOLOWriter:
             out_file = open(
             self.filename + TXT_EXT, 'w', encoding=ENCODE_METHOD)
             classes_file = os.path.join(os.path.dirname(os.path.abspath(self.filename)), "classes.txt")
-            out_class_file = open(classes_file, 'w')
+            out_class_file = open(classes_file, 'w', encoding=ENCODE_METHOD)
 
         else:
             out_file = codecs.open(target_file, 'w', encoding=ENCODE_METHOD)
             classes_file = os.path.join(os.path.dirname(os.path.abspath(target_file)), "classes.txt")
-            out_class_file = open(classes_file, 'w')
+            out_class_file = open(classes_file, 'w', encoding=ENCODE_METHOD)
 
 
         for box in self.box_list:
@@ -105,7 +105,9 @@ class YoloReader:
             raise YoloParseError(
                 'classes.txt not found at "%s" — required to map YOLO class '
                 'indices to label names.' % self.class_list_path)
-        with open(self.class_list_path, 'r') as classes_file:
+        # utf-8-sig: a BOM (e.g. from Windows Notepad) must not become part
+        # of the first class name.
+        with open(self.class_list_path, 'r', encoding='utf-8-sig') as classes_file:
             self.classes = classes_file.read().strip('\n').split('\n')
 
         # print (self.classes)
@@ -145,7 +147,7 @@ class YoloReader:
         return label, x_min, y_min, x_max, y_max
 
     def parse_yolo_format(self):
-        with open(self.file_path, 'r') as bnd_box_file:
+        with open(self.file_path, 'r', encoding=ENCODE_METHOD) as bnd_box_file:
             for line in bnd_box_file:
                 parts = line.split()
                 if not parts:

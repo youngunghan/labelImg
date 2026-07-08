@@ -105,6 +105,18 @@ class MainWindow(QMainWindow, WindowMixin):
         # Stack of classify (good/bad) moves so they can be undone with Ctrl+Z.
         # Each entry is a list of (dest_path, original_path) for the image + its labels.
         self.classify_history = []
+        # User-configurable classify categories: (shortcut, folder-suffix)
+        # pairs, editable via File > Edit Classify Categories. Sanitize the
+        # loaded value — a corrupted/hand-edited pickle must not be able to
+        # crash __init__ (fall back to the defaults instead).
+        default_targets = [('g', 'good'), ('b', 'bad')]
+        try:
+            raw_targets = settings.get(SETTING_CLASSIFY_TARGETS, default_targets)
+            self.classify_targets = [(str(k), str(n)) for k, n in
+                                     (t for t in raw_targets
+                                      if isinstance(t, (list, tuple)) and len(t) == 2)] or default_targets
+        except (TypeError, ValueError):
+            self.classify_targets = default_targets
 
         # Whether we need to save or not.
         self.dirty = False
@@ -277,16 +289,15 @@ class MainWindow(QMainWindow, WindowMixin):
 
         delete_image = action(get_str('deleteImg'), self.delete_image, 'Ctrl+Shift+D', 'close', get_str('deleteImgDetail'))
 
-        sort_good = action('Classify Good (→ _good)', partial(self.classify_current_image, 'good'),
-                           'g', 'next',
-                           'Move current image + its label to "<folder>_good" and go to next',
-                           enabled=False)
-        sort_bad = action('Classify Bad (→ _bad)', partial(self.classify_current_image, 'bad'),
-                          'b', 'close',
-                          'Move current image + its label to "<folder>_bad" and go to next',
-                          enabled=False)
+        # (fork) One classify action per user-configured (shortcut, name)
+        # category — default g/good + b/bad, editable at runtime via
+        # File > Edit Classify Categories.
+        self.classify_actions = self.create_classify_actions()
         undo_sort = action('Undo Classify', self.undo_classify, 'Ctrl+Z', 'undo',
-                           'Undo the last good/bad classify move')
+                           'Undo the last classify move')
+        edit_categories = action('Edit Classify Categories', self.edit_classify_categories,
+                                 None, 'edit',
+                                 'Edit the classify shortcut/folder pairs (saved permanently)')
 
         reset_all = action(get_str('resetAll'), self.reset_all, None, 'resetall', get_str('resetAllDetail'))
 
@@ -404,7 +415,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
-                              sortGood=sort_good, sortBad=sort_bad, undoSort=undo_sort,
+                              classifyActions=self.classify_actions, undoSort=undo_sort, editCategories=edit_categories,
                               lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
                               createMode=create_mode, editMode=edit_mode, advancedMode=advanced_mode,
                               shapeLineColor=shape_line_color, shapeFillColor=shape_fill_color,
@@ -422,7 +433,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               advancedContext=(create_mode, edit_mode, edit, copy,
                                                delete, shape_line_color, shape_fill_color),
                               onLoadActive=(
-                                  close, create, create_mode, edit_mode, sort_good, sort_bad),
+                                  close, create, create_mode, edit_mode) + tuple(self.classify_actions),
                               onShapesPresent=(save_as, hide_all, show_all))
 
         self.menus = Struct(
@@ -451,7 +462,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.display_label_option.triggered.connect(self.toggle_paint_labels_option)
 
         add_actions(self.menus.file,
-                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image, sort_good, sort_bad, undo_sort, edit_classes, quit))
+                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image)
+                    + tuple(self.classify_actions)
+                    + (undo_sort, edit_categories, edit_classes, quit))
         add_actions(self.menus.help, (help_default, show_info, show_shortcut))
         add_actions(self.menus.view, (
             self.auto_saving,
@@ -937,7 +950,10 @@ class MainWindow(QMainWindow, WindowMixin):
                 raise LabelFileError('Unsupported label file format: %s' % self.label_file_format)
             print('Image:{0} -> Annotation:{1}'.format(self.file_path, annotation_file_path))
             return True
-        except LabelFileError as e:
+        # ValueError covers a corrupt/mis-encoded existing CreateML JSON that
+        # the writer merge-reads (incl. UnicodeDecodeError); EnvironmentError
+        # covers unwritable paths. Neither may crash the app mid-save.
+        except (LabelFileError, EnvironmentError, ValueError) as e:
             self.error_message(u'Error saving label data', u'<b>%s</b>' % e)
             return False
 
@@ -1745,6 +1761,94 @@ class MainWindow(QMainWindow, WindowMixin):
             elif self.img_count > 0:
                 self.cur_img_idx = min(self.cur_img_idx, self.img_count - 1)
                 self.load_file(self.m_img_list[self.cur_img_idx])
+
+    def create_classify_actions(self):
+        """self.classify_targets의 (단축키, 폴더이름) 쌍마다 QAction을 만든다.
+        classify_current_image(name)가 '<현재폴더>_<name>'으로 이동을 수행한다."""
+        actions = []
+        for key, name in self.classify_targets:
+            icon = {'good': 'next', 'bad': 'close'}.get(name, 'next')
+            actions.append(new_action(
+                self, 'Classify %s (%s → _%s)' % (name.capitalize(), key, name),
+                partial(self.classify_current_image, name), key, icon,
+                'Move current image + its label to "<folder>_%s" and go to next' % name,
+                enabled=False))
+        return actions
+
+    def edit_classify_categories(self):
+        current = "\n".join('%s %s' % (key, name) for key, name in self.classify_targets)
+        text, ok = QInputDialog.getMultiLineText(
+            self, 'Edit Classify Categories',
+            'One category per line: <shortcut> <folder-name>  (e.g. "g good").\n'
+            'The shortcut moves the image + its label to "<folder>_<name>".\n'
+            'Saved permanently.',
+            current)
+        if not ok:
+            return
+        # Shortcuts already bound elsewhere in the app must be rejected:
+        # Qt treats a duplicate as ambiguous and silently disables BOTH keys.
+        taken = {}
+        for act in self.findChildren(QAction):
+            if act in self.classify_actions:
+                continue
+            seq = act.shortcut().toString()
+            if seq:
+                taken[seq.lower()] = act.text().replace('&', '') or 'an app action'
+        bad_name_chars = set('\\/:*?"<>|')
+        targets, seen = [], set()
+        for line in text.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            if len(parts) != 2:
+                self.error_message('Edit Classify Categories',
+                                   'Each line needs exactly "<shortcut> <folder-name>": %s' % line)
+                return
+            key, name = parts
+            # QKeySequence('gb') parses to an unmatchable Key_unknown whose
+            # toString() is '' — that would be a silently dead hotkey.
+            key_str = QKeySequence(key).toString()
+            if not key_str:
+                self.error_message('Edit Classify Categories',
+                                   '"%s" is not a usable shortcut key.' % key)
+                return
+            if key_str.lower() in taken:
+                self.error_message('Edit Classify Categories',
+                                   'Shortcut "%s" is already used by "%s".'
+                                   % (key_str, taken[key_str.lower()]))
+                return
+            if any(c in bad_name_chars for c in name):
+                self.error_message('Edit Classify Categories',
+                                   'Folder name "%s" contains characters not allowed in folder names.' % name)
+                return
+            if key_str.lower() in seen:
+                self.error_message('Edit Classify Categories',
+                                   'Duplicate shortcut: %s' % key)
+                return
+            seen.add(key_str.lower())
+            targets.append((key, name))
+        if not targets:
+            return
+        self.classify_targets = targets
+        self.settings[SETTING_CLASSIFY_TARGETS] = targets
+        self.settings.save()
+        self.rebuild_classify_actions()
+
+    def rebuild_classify_actions(self):
+        """카테고리 편집 후 메뉴/단축키/onLoadActive를 재구성한다(재시작 불필요)."""
+        old_actions = list(self.classify_actions)
+        # 새 액션의 활성 상태는 기존 이미지-의존 액션(close)의 상태를 따른다.
+        loaded = self.actions.close.isEnabled()
+        for act in old_actions:
+            self.menus.file.removeAction(act)
+            act.setParent(None)
+        self.classify_actions = self.create_classify_actions()
+        for act in self.classify_actions:
+            act.setEnabled(loaded)
+            self.menus.file.insertAction(self.actions.undoSort, act)
+        self.actions.classifyActions = self.classify_actions
+        base = tuple(a for a in self.actions.onLoadActive if a not in old_actions)
+        self.actions.onLoadActive = base + tuple(self.classify_actions)
 
     def reset_all(self):
         self.settings.reset()

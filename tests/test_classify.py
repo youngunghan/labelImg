@@ -34,12 +34,24 @@ class TestClassifyWorkflow(unittest.TestCase):
             img.save(os.path.join(self.dir, stem + '.png'))
             with open(os.path.join(self.dir, stem + '.xml'), 'w') as f:
                 f.write('<annotation></annotation>')
+        self.win = None
+        self.launch()
 
-        # Open the directory the same way the CLI does (fork keeps the CLI
-        # dir ahead of any remembered lastOpenDir). Patch expanduser for the
-        # construction window so Settings() reads a fresh pickle from tmp —
-        # the developer's real ~/.labelImgSettings.pkl must steer neither
-        # construction (read) nor teardown (write).
+    def launch(self, classify_targets=None):
+        """Open the directory the same way the CLI does (fork keeps the CLI
+        dir ahead of any remembered lastOpenDir). expanduser is patched for
+        the construction window so Settings() reads a fresh pickle from tmp —
+        the developer's real ~/.labelImgSettings.pkl must steer neither
+        construction (read) nor teardown (write)."""
+        if self.win is not None:
+            self.win.close()
+        if classify_targets is not None:
+            from libs.settings import Settings
+            from libs.constants import SETTING_CLASSIFY_TARGETS
+            seeded = Settings()
+            seeded.path = os.path.join(self.tmp.name, '.labelImgSettings.pkl')
+            seeded[SETTING_CLASSIFY_TARGETS] = classify_targets
+            seeded.save()
         with mock.patch('os.path.expanduser', return_value=self.tmp.name):
             self.app, self.win = get_main_app([sys.argv[0], self.dir])
         self.win.settings.path = os.path.join(self.tmp.name, 'settings.pkl')
@@ -124,6 +136,88 @@ class TestClassifyWorkflow(unittest.TestCase):
         # the restored image becomes current again
         self.assertEqual(self.path(self.dir, 'a.png'), self.win.file_path)
         self.assertEqual(3, len(self.win.m_img_list))
+
+    def test_default_categories_are_good_and_bad(self):
+        self.assertEqual([('g', 'good'), ('b', 'bad')], self.win.classify_targets)
+        self.assertEqual(['g', 'b'],
+                         [a.shortcut().toString().lower() for a in self.win.classify_actions])
+
+    def test_custom_categories_from_settings(self):
+        self.launch(classify_targets=[('r', 'review'), ('t', 'trash')])
+
+        self.assertEqual([('r', 'review'), ('t', 'trash')], self.win.classify_targets)
+        self.assertEqual(['r', 't'],
+                         [a.shortcut().toString().lower() for a in self.win.classify_actions])
+        # image is loaded, so the actions are enabled via onLoadActive
+        self.assertTrue(all(a.isEnabled() for a in self.win.classify_actions))
+
+        self.win.classify_current_image('review')
+        self.assertTrue(os.path.isfile(self.path(self.dir + '_review', 'a.png')))
+        self.assertTrue(os.path.isfile(self.path(self.dir + '_review', 'a.xml')))
+        self.assertEqual([], self.errors)
+
+    def test_edit_categories_rebuilds_actions_live(self):
+        with mock.patch('labelImg.QInputDialog.getMultiLineText',
+                        return_value=('k keep\nx trash', True)):
+            self.win.edit_classify_categories()
+
+        self.assertEqual([('k', 'keep'), ('x', 'trash')], self.win.classify_targets)
+        self.assertEqual(['k', 'x'],
+                         [a.shortcut().toString().lower() for a in self.win.classify_actions])
+        # rebuilt actions are live: in the File menu, enabled, and undoable set
+        menu_actions = self.win.menus.file.actions()
+        for act in self.win.classify_actions:
+            self.assertIn(act, menu_actions)
+            self.assertTrue(act.isEnabled())
+            self.assertIn(act, self.win.actions.onLoadActive)
+        # persisted for the next session
+        from libs.constants import SETTING_CLASSIFY_TARGETS
+        self.assertEqual([('k', 'keep'), ('x', 'trash')],
+                         self.win.settings.get(SETTING_CLASSIFY_TARGETS))
+        # the new category actually classifies
+        self.win.classify_current_image('keep')
+        self.assertTrue(os.path.isfile(self.path(self.dir + '_keep', 'a.png')))
+        self.assertEqual([], self.errors)
+
+    def test_edit_categories_rejects_duplicate_shortcut(self):
+        with mock.patch('labelImg.QInputDialog.getMultiLineText',
+                        return_value=('g good\ng again', True)):
+            self.win.edit_classify_categories()
+        self.assertEqual(1, len(self.errors))
+        self.assertIn('Duplicate', self.errors[0][1])
+        # unchanged on error
+        self.assertEqual([('g', 'good'), ('b', 'bad')], self.win.classify_targets)
+
+    def test_edit_categories_rejects_app_shortcut_collision(self):
+        # 'd' is Next Image — an ambiguous Qt shortcut would silently disable
+        # BOTH keys, so the dialog must refuse it.
+        with mock.patch('labelImg.QInputDialog.getMultiLineText',
+                        return_value=('d trash', True)):
+            self.win.edit_classify_categories()
+        self.assertEqual(1, len(self.errors))
+        self.assertIn('already used', self.errors[0][1])
+        self.assertEqual([('g', 'good'), ('b', 'bad')], self.win.classify_targets)
+
+    def test_edit_categories_rejects_unparseable_key(self):
+        # QKeySequence('gb') is Key_unknown -> a permanently dead hotkey.
+        with mock.patch('labelImg.QInputDialog.getMultiLineText',
+                        return_value=('gb keep', True)):
+            self.win.edit_classify_categories()
+        self.assertEqual(1, len(self.errors))
+        self.assertIn('not a usable shortcut', self.errors[0][1])
+
+    def test_edit_categories_rejects_bad_folder_characters(self):
+        with mock.patch('labelImg.QInputDialog.getMultiLineText',
+                        return_value=('k a/b', True)):
+            self.win.edit_classify_categories()
+        self.assertEqual(1, len(self.errors))
+        self.assertIn('not allowed', self.errors[0][1])
+
+    def test_malformed_settings_value_falls_back_to_defaults(self):
+        # a corrupted pickle (string instead of pair list) must not crash
+        # MainWindow.__init__ — it falls back to g/good + b/bad.
+        self.launch(classify_targets='gb')
+        self.assertEqual([('g', 'good'), ('b', 'bad')], self.win.classify_targets)
 
 
 if __name__ == '__main__':
