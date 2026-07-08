@@ -51,6 +51,9 @@ which was archived in February 2024 (read-only) when LabelImg joined the Label
 Studio community. Changes can no longer be merged upstream, so this fork
 carries them independently.
 
+.. image:: /readme/images/demo-triage.gif
+        :alt: Keyboard triage demo — g/b classify an image with its label (atomic move), Ctrl+Z undo
+
 What this fork adds on top of upstream ``b33f965``:
 
 - **Good/Bad image triage** — press ``g``/``b`` to move the current image *and*
