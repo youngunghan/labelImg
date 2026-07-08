@@ -35,11 +35,11 @@ labelImg는 같은 화면 작업 결과를 **세 가지 포맷**으로 저장할
 
 ### CreateML — 리스트형 JSON
 
-최상위가 이미지 객체들의 **리스트**다. 각 이미지 = `{"image": 파일명, "verified": bool, "annotations": [{"label", "coordinates": {x, y, width, height}}]}`. `x,y`는 모서리가 아니라 **박스 중심**(`libs/create_ml_io.py:90-92`). writer는 기존 JSON을 읽어 같은 `image`가 있으면 **교체**, 없으면 append하므로(`libs/create_ml_io.py:60-69`) 같은 출력 파일을 재사용하면 여러 이미지를 누적할 수 있다. 단 앱의 기본 저장(`Ctrl+S`)은 **이미지별 `<stem>.json`** 을 만들어(`labelImg.py:930-934`) 보통 각 파일에 이미지 1개만 들어간다.
+최상위가 이미지 객체들의 **리스트**다. 각 이미지 = `{"image": 파일명, "verified": bool, "annotations": [{"label", "coordinates": {x, y, width, height}}]}`. `x,y`는 모서리가 아니라 **박스 중심**(`libs/create_ml_io.py:90-92`). writer는 기존 JSON을 읽어 같은 `image`가 있으면 **교체**, 없으면 append하므로(`libs/create_ml_io.py:60-69`) 같은 출력 파일을 재사용하면 여러 이미지를 누적할 수 있다. 단 앱의 기본 저장(`Ctrl+S`)은 **이미지별 `<stem>.json`** 을 만들어(`labelImg.py:943-947`) 보통 각 파일에 이미지 1개만 들어간다.
 
 ## 포맷 전환
 
-현재 포맷은 `MainWindow.label_file_format`(`LabelFileFormat` enum)으로 추적된다. 툴바의 포맷 버튼(`change_format`, `labelImg.py:595`)을 누르면 `PASCAL_VOC → YOLO → CREATE_ML → PASCAL_VOC` 순으로 **순환**하고, `set_format`(`labelImg.py:576`)이 버튼의 텍스트/아이콘과 함께 클래스 변수 `LabelFile.suffix`(`.xml`/`.txt`/`.json`)를 바꾼다. 이 suffix는 "이 파일이 라벨 파일인가"를 판정하는 `is_label_file`의 기준이 된다(`libs/labelFile.py:146-149`). 마지막 사용 포맷은 `SETTING_LABEL_FILE_FORMAT` 키로 영속화된다.
+현재 포맷은 `MainWindow.label_file_format`(`LabelFileFormat` enum)으로 추적된다. 툴바의 포맷 버튼(`change_format`, `labelImg.py:608`)을 누르면 `PASCAL_VOC → YOLO → CREATE_ML → PASCAL_VOC` 순으로 **순환**하고, `set_format`(`labelImg.py:589`)이 버튼의 텍스트/아이콘과 함께 클래스 변수 `LabelFile.suffix`(`.xml`/`.txt`/`.json`)를 바꾼다. 이 suffix는 "이 파일이 라벨 파일인가"를 판정하는 `is_label_file`의 기준이 된다(`libs/labelFile.py:146-149`). 마지막 사용 포맷은 `SETTING_LABEL_FILE_FORMAT` 키로 영속화된다.
 
 ## Reader/Writer 대칭과 공통 인터페이스
 
@@ -51,7 +51,7 @@ writer 인터페이스는 완전히 대칭이 아니다. `PascalVocWriter`와 `Y
 
 - **difficult 비대칭**: VOC만 difficult를 온전히 라운드트립한다. YOLO는 폐기, CreateML reader는 모든 박스를 `difficult=True`로 로드한다(`libs/create_ml_io.py:132` — 의도와 다를 수 있는 동작).
 - **색상은 VOC에도 안 들어간다**: `format_shape`는 색을 직렬화하지만 어떤 writer도 색을 기록하지 않는다 — 색은 화면 표시용일 뿐 라벨 파일엔 없다.
-- **Reader 실패 처리는 포맷마다 다름**: `PascalVocReader`는 `try/except: pass`로 **모든** 예외를 삼켜 그 시점까지 파싱된 shapes만 돌려준다(`libs/pascal_voc_io.py:135-138`) — 파일 수준 파싱 오류면 빈 리스트, object 순회 도중 실패면 부분 결과다(append가 순회 중 즉시 일어나므로, `libs/pascal_voc_io.py:163-170`). `CreateMLReader`는 **`ValueError`만** 잡아 "JSON decoding failed"를 출력하고(빈 결과), 그 외 예외(KeyError/IOError 등)는 전파한다(`libs/create_ml_io.py:102-105`). `YoloReader`는 (포크 견고화 2026-07-07) `classes.txt` 부재 시 `YoloParseError`를 명시적으로 던지고(`libs/yolo_io.py:104-107`) 호출부가 에러 대화상자로 처리하며(`labelImg.py:1908-1917`), 불량 라인(NaN/inf 좌표 포함)은 건너뛰고 `skipped_lines`로 집계해 상태바에 알린다(`libs/yolo_io.py:147-168`) — 상류는 예외 처리가 전무해(try/except 주석 처리) 이 모든 경우에 앱이 크래시했다.
-- **CreateML verified는 보존된다**: `CreateMLWriter.__init__`은 `verified=False`로 시작하지만(`libs/create_ml_io.py:21`), 실제 저장 경로인 `LabelFile.save_create_ml_format`이 `writer.verified = self.verified`로 덮어쓴다(`libs/labelFile.py:49`; VOC/YOLO도 동일). 따라서 화면의 verified 상태가 그대로 기록된다. 단 reader 쪽은 비대칭이다 — `CreateMLReader.parse_json`은 verified를 현재 이미지와 매칭된 엔트리가 아니라 리스트 첫 엔트리에서 읽으므로(`libs/create_ml_io.py:115`), 여러 이미지가 누적된 JSON에서는 다른 이미지의 verified가 표시될 수 있다.
+- **Reader 실패 처리는 포맷마다 다름**: `PascalVocReader`는 `try/except: pass`로 **모든** 예외를 삼켜 그 시점까지 파싱된 shapes만 돌려준다(`libs/pascal_voc_io.py:135-138`) — 파일 수준 파싱 오류면 빈 리스트, object 순회 도중 실패면 부분 결과다(append가 순회 중 즉시 일어나므로, `libs/pascal_voc_io.py:163-170`). `CreateMLReader`는 **`ValueError`만** 잡아 "JSON decoding failed"를 출력하고(빈 결과), 그 외 예외(KeyError/IOError 등)는 전파한다(`libs/create_ml_io.py:102-105`). `YoloReader`는 (포크 견고화 2026-07-07) `classes.txt` 부재 시 `YoloParseError`를 명시적으로 던지고(`libs/yolo_io.py:104-107`) 호출부가 에러 대화상자로 처리하며(`labelImg.py:2012-2021`), 불량 라인(NaN/inf 좌표 포함)은 건너뛰고 `skipped_lines`로 집계해 상태바에 알린다(`libs/yolo_io.py:147-168`) — 상류는 예외 처리가 전무해(try/except 주석 처리) 이 모든 경우에 앱이 크래시했다.
+- **CreateML verified는 보존된다**: `CreateMLWriter.__init__`은 `verified=False`로 시작하지만(`libs/create_ml_io.py:21`), 실제 저장 경로인 `LabelFile.save_create_ml_format`이 `writer.verified = self.verified`로 덮어쓴다(`libs/labelFile.py:49`; VOC/YOLO도 동일). 따라서 화면의 verified 상태가 그대로 기록된다. 단 reader 쪽은 비대칭이다 — (2026-07-08 수정) `CreateMLReader.parse_json`은 verified를 현재 이미지와 매칭된 엔트리에서 읽는다(`libs/create_ml_io.py:121`) — 이전에는 리스트 첫 엔트리에서 읽어 다중 이미지 JSON에서 오표시됐다.
 
 관련: [../reference/formats.md](../reference/formats.md) · [architecture.md](architecture.md)

@@ -7,12 +7,12 @@
 
 | Metric | Value |
 |---|---|
-| Diff vs upstream | 32 files, **+2,098 / −71** |
-| Core app (`labelImg.py`) | +306 / −19 |
+| Diff vs upstream | 37 files, **+2,376 / −78** |
+| Core app (`labelImg.py`) | +373 / −19 |
 | New documentation | `docs/` tree: 18 files, ~1,200 lines (Diátaxis: tutorials / how-to / reference / explanation) |
 | Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`) |
-| Tests | **18/18 passing** — 8 fork tests added (atomic-move rollback via fault injection, undo, YOLO robustness); suite made environment-independent |
-| Upstream bugs fixed | 4 crash / silent-failure defects (see table) |
+| Tests | **25/25 passing** — 15 fork tests added (atomic-move rollback via fault injection, undo, YOLO robustness); suite made environment-independent |
+| Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
 | CI | GitHub Actions: test matrix (Linux/Windows × Py3.9/3.12, headless Qt) + ruff critical-rules lint |
 
 ## Features added
@@ -45,6 +45,13 @@ directory passed on the command line wins over the remembered `lastOpenDir`, the
 save dir survives startup, a cancelled directory dialog returns early, and the first
 image is no longer imported (and its boxes loaded) twice.
 
+### User-defined triage categories (2026-07-08)
+
+good/bad are just the defaults: *File > Edit Classify Categories* accepts any
+number of `<shortcut> <folder-name>` pairs (e.g. ``k keep`` / ``x trash``),
+rebuilds the menu and shortcuts live, and persists them in the settings
+pickle. Atomicity and undo are category-agnostic.
+
 ### Shortcut conflict fix
 
 Single Class Mode moved from `Ctrl+Shift+S` — which upstream double-bound to
@@ -58,6 +65,8 @@ Single Class Mode moved from `Ctrl+Shift+S` — which upstream double-bound to
 | 2 | *Copy Previous Bounding Boxes* crashes with `ValueError` on a standalone (Open File) image | unguarded `m_img_list.index(file_path)` | membership guard, quiet no-op |
 | 3 | Saving with an unsupported format silently did nothing | `else` branch called the commented-out `LabelFile.save` → would `AttributeError` | raise `LabelFileError`, caught by the existing handler → clear error dialog |
 | 4 | Opening a YOLO folder crashed on a missing `classes.txt`, a malformed line, or an out-of-range class index | `YoloReader` had no error handling (`try/except` left commented out) | clear error dialog (`YoloParseError`), malformed lines skipped and counted, status-bar notice |
+| 5 | Multi-image CreateML files showed another image's *verified* badge | reader always took `verified` from the first JSON entry | read it from the entry matching the current image |
+| 6 | Non-ASCII labels could mangle or crash on locale-encoded systems (e.g. cp949) | `classes.txt` and CreateML JSON were read/written with the OS default encoding | all six I/O call sites fixed to UTF-8 |
 
 ## Documentation added
 
@@ -77,13 +86,12 @@ Effort: **S** small / **M** medium / **L** large.
 
 1. ~~**[M] YOLO reader crash-safety**~~ — **done (2026-07-07)**: missing `classes.txt`
    raises `YoloParseError` → error dialog; malformed lines are skipped and counted
-   (`libs/yolo_io.py:104-168`, `labelImg.py:1908-1920`), with regression tests.
-2. **[S] Consistent text encodings** — annotation `.txt` is written UTF-8 but
-   `classes.txt` and CreateML JSON are read/written with the OS locale encoding
-   (`yolo_io.py`, `create_ml_io.py`) → mojibake/crashes for non-ASCII labels on Windows (cp949).
-3. **[S] CreateML `verified` read from the wrong entry** — always taken from the first
-   JSON array entry (`create_ml_io.py:115`), so multi-image files show another image's
-   verified badge.
+   (`libs/yolo_io.py:104-168`, `labelImg.py:2012-2024`), with regression tests.
+2. ~~**[S] Consistent text encodings**~~ — **done (2026-07-08)**: all YOLO and
+   CreateML I/O call sites now read/write UTF-8; non-ASCII labels round-trip
+   (regression-tested with Korean labels).
+3. ~~**[S] CreateML `verified` read from the wrong entry**~~ — **done (2026-07-08)**:
+   read from the matching entry (`create_ml_io.py:121`), with multi-image tests.
 4. **[S] Surface CreateML read errors** — decode failures are swallowed (`ValueError`
    catch) and the image loads as if it had no annotations.
 5. **[S] Working *Reset All* restart** — `QProcess.startDetached(__file__)` can't work on
@@ -94,8 +102,9 @@ Effort: **S** small / **M** medium / **L** large.
 
 ### Triage workflow
 
-7. **[M] User-defined categories** — generalize hard-coded good/bad to configurable
-   N categories (the move/rollback/undo core is already generic).
+7. ~~**[M] User-defined categories**~~ — **done (2026-07-08)**: `(shortcut, name)`
+   pairs in settings, edited live via *File > Edit Classify Categories*
+   (menu/shortcut rebuild without restart, duplicate-shortcut validation).
 8. **[M] Incremental list update on classify** — currently every `g`/`b` rescans the whole
    directory and decodes the image twice; pop from the list instead (also applies to
    undo and delete-image paths).
@@ -118,12 +127,14 @@ Effort: **S** small / **M** medium / **L** large.
     drives a real `MainWindow` (CLI dir import, move+advance, collision rename,
     fault-injected rollback, undo) and `tests/test_yolo_reader.py` covers the YOLO
     hardening; plain `unittest`, no new test dependency.
-16. **[M] Release automation** — build the Windows exe from `labelImg.spec` on tag push
-    and attach it to the GitHub Release; move packaging to `pyproject.toml` under a
-    distinct distribution name.
+16. ~~**[M] Release automation**~~ — **partially done (2026-07-08)**: `release.yml`
+    builds the Windows exe from `labelImg.spec` on `v*` tag push and attaches
+    exe + SHA256 to the GitHub Release. Remaining: `pyproject.toml` packaging
+    under a distinct distribution name.
 17. **[M] Remove Python 2 / PyQt4 remnants** — dead import fallbacks in 15 files, no-op
     `ustr()` wrappers, `qt4py2` build paths; unblocks ruff/type-checking.
-18. **[S] Demo GIF in README** — the selling point is interaction; demo images still
-    hot-link the upstream repo. (Badge part done 2026-07-07: the dead upstream workflow
-    badge now points at this fork's CI.)
+18. ~~**[S] Demo GIF in README**~~ — **done (2026-07-08)**: an app-driven recording
+    (g/b classify + Ctrl+Z undo, captured programmatically frame-by-frame) now
+    tops the fork section. Badge fixed 2026-07-07. Upstream-hot-linked demo
+    images remain to be re-pointed.
 19. **[L] Qt6 migration (PySide6)** — after tests and dead-code removal land.

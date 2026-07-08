@@ -65,8 +65,9 @@
 
 | 키 | 동작 |
 |---|---|
-| `g` | Classify Good — 현재 이미지+라벨을 `<폴더>_good/`로 **이동** 후 다음 |
-| `b` | Classify Bad — `<폴더>_bad/`로 **이동** 후 다음 |
+| `g`(기본값, 변경 가능) | Classify Good — 현재 이미지+라벨을 `<폴더>_good/`로 **이동** 후 다음 |
+| `b`(기본값, 변경 가능) | Classify Bad — `<폴더>_bad/`로 **이동** 후 다음 |
+| (메뉴 전용) | **File > Edit Classify Categories** — 분류 카테고리 `(단축키, 폴더이름)` 목록 편집(재시작 불필요, 설정에 영속) |
 | `Ctrl+Z` | 마지막 분류 이동 되돌리기(Undo Classify) |
 
 > `g`/`b`는 수정자 없는 단일 키이고 디스크에서 파일을 옮긴다. 상세·주의는 [../how-to/more-features.md](../how-to/more-features.md).

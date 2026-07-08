@@ -82,8 +82,8 @@ dog
 
 주의:
 - **difficult는 저장되지 않으며 읽을 때 항상 `False`** (`yolo_io.py:170-171`).
-- 라벨 txt는 저장 시 `DEFAULT_ENCODING`으로 열지만 `classes.txt`는 인코딩 지정 없이 열린다(`yolo_io.py:60-68`). 읽기 시에는 `classes.txt`(`yolo_io.py:108`)와 라벨 txt(`yolo_io.py:148`) 모두 인코딩 지정이 없다 → 비ASCII 클래스명은 플랫폼 간 불일치 가능.
-- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:147-168`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:1908-1917`).
+- (2026-07-08 통일) 라벨 txt와 `classes.txt` 모두 저장(`yolo_io.py:60-68`)·읽기(`yolo_io.py:108`, `yolo_io.py:148`)가 `DEFAULT_ENCODING`(utf-8)으로 고정됐다 — 비ASCII 클래스명이 플랫폼과 무관하게 라운드트립된다. (이전에는 `classes.txt`와 읽기 경로가 OS 로케일을 따라 한국어 Windows(cp949)에서 mojibake/크래시 위험이 있었다.)
+- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:147-168`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:2012-2021`).
 
 ---
 
@@ -110,15 +110,15 @@ dog
 
 - `coordinates.x`/`y`는 박스 **중심**(절대 픽셀), `width`/`height`는 크기.
   - 저장: `width = x_max-x_min`, `height = y_max-y_min`, `x = x_min + width/2`, `y = y_min + height/2` (`create_ml_io.py:73-93`).
-  - 복원: `x_min = x - width/2`, `y_min = y - height/2`, `x_max = x + width/2`, `y_max = y + height/2` (`create_ml_io.py:125-129`).
+  - 복원: `x_min = x - width/2`, `y_min = y - height/2`, `x_max = x + width/2`, `y_max = y + height/2` (`create_ml_io.py:126-130`).
 - writer는 기존 파일을 읽어 같은 `image`가 있으면 **그 항목을 통째로 교체**, 없으면 append한다(병합 아님; `create_ml_io.py:60-69`). 단 기본 저장은 이미지별 파일이라 보통 항목 1개.
 
 주의:
-- Reader는 `output_list[0]`(첫 항목)의 `verified`만 읽어 파일 전체 verified로 삼는다(`create_ml_io.py:114-115`).
-- **Reader가 만드는 모든 shape의 difficult가 `True`로 하드코딩**돼 있다(5-튜플 마지막 원소, `create_ml_io.py:132`) — 다른 포맷과 다른 동작이니 주의.
+- Reader는 현재 이미지와 **매칭되는 항목**의 `verified`를 읽는다(`create_ml_io.py:119-123`; 2026-07-08 수정 — 이전에는 첫 항목에서 읽어 다중 이미지 파일에서 오표시).
+- **Reader가 만드는 모든 shape의 difficult가 `True`로 하드코딩**돼 있다(5-튜플 마지막 원소, `create_ml_io.py:133`) — 다른 포맷과 다른 동작이니 주의.
 - writer `__init__`은 `verified=False`지만(`create_ml_io.py:21`) 저장 경로 `LabelFile.save_create_ml_format`이 `writer.verified=self.verified`로 덮어쓴다(`labelFile.py:49`) → verified는 보존됨.
 - Reader는 `ValueError`만 잡아 출력하고(빈 결과) 그 외 예외는 전파한다(`create_ml_io.py:102-105`) — VOC reader의 전부-삼킴과 다름.
-- 저장은 utf-8이지만(`create_ml_io.py:71`) 기존 파일 병합 읽기(`create_ml_io.py:27`)와 Reader 파싱(`create_ml_io.py:108`)은 인코딩 지정 없이 열린다 → 비ASCII 라벨은 Windows 등에서 라운드트립이 깨질 수 있다.
+- (2026-07-08 통일) 저장(`create_ml_io.py:71`)·병합 읽기(`create_ml_io.py:27`)·Reader 파싱(`create_ml_io.py:108`) 모두 utf-8로 고정 — 비ASCII 라벨이 안전하게 라운드트립된다.
 
 ---
 

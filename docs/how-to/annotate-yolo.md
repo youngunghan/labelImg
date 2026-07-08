@@ -35,7 +35,7 @@ car
 - **라벨 목록을 작업 도중 바꾸지 말 것.** 이미지를 저장할 때마다 `classes.txt`가 갱신되지만, **이전에 저장한 라벨 파일의 인덱스는 갱신되지 않아** 매핑이 어긋난다. 특히 작업 도중 **Edit Default Classes**(`Ctrl+Shift+E`)로 클래스 순서를 바꾸거나 삭제하면 다음 저장부터 새 순서로 `classes.txt`와 인덱스가 기록되어, 이전에 저장한 txt의 인덱스가 즉시 어긋난다.
 - **YOLO 저장 시 `difficult` 플래그는 폐기된다.** 다시 읽으면 모든 박스가 `difficult=False`가 된다.
 - YOLO 저장에는 **"default class"(single-class) 기능이 참조되지 않는다.**
-- `classes.txt`는 인코딩 지정 없이 쓰이므로 비ASCII 클래스명은 플랫폼 간 불일치 가능성이 있다.
+- (2026-07-08) `classes.txt`와 라벨 txt는 읽기/쓰기 모두 utf-8로 고정되어 비ASCII(한국어 등) 클래스명이 안전하다.
 - `classes.txt`가 없는 폴더의 txt를 열면 에러 대화상자가 뜨고 이미지는 라벨 없이 표시된다(크래시하지 않음). 형식이 틀린 라인(NaN/inf 좌표 포함)은 건너뛰고 상태바에 `Skipped N malformed line(s)`로 알린다(포크 견고화, `libs/yolo_io.py:104-168`).
 
 정확한 좌표 변환식·역변환은 [../reference/formats.md](../reference/formats.md#2-yolo-txt--classestxt).

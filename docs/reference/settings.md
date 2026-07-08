@@ -14,7 +14,7 @@ labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pk
 | `reset()` | `:40-45` | pkl 파일 삭제, `data={}`, `path=None` |
 
 - 시작 시 `MainWindow.__init__`이 `Settings().load()`로 메모리에 올린다.
-- 종료 시 `closeEvent`(`labelImg.py:1269`)가 아래 키를 모두 기록한 뒤 `save()`한다.
+- 종료 시 `closeEvent`(`labelImg.py:1285`)가 아래 키를 모두 기록한 뒤 `save()`한다.
 
 > ⚠️ `load()`가 손상된 pkl을 조용히 무시하므로(빈 설정으로 동작), 설정이 이상하면 파일을 지우는 게 가장 확실하다 → [../how-to/reset-and-troubleshoot.md](../how-to/reset-and-troubleshoot.md).
 > ⚠️ `reset()` 이후 `path=None`이라 그 세션의 이후 `save()`는 저장되지 않는다(`settings.py:24,45`).
@@ -38,12 +38,13 @@ labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pk
 | `SETTING_SINGLE_CLASS` | `singleclass` | single-class(기본 라벨) 모드 |
 | `SETTING_DRAW_SQUARE` | `draw/square` | 정사각형 그리기 |
 | `SETTING_LABEL_FILE_FORMAT` | `labelFileFormat` | 마지막 사용 포맷(VOC/YOLO/CreateML) |
+| `SETTING_CLASSIFY_TARGETS` | `classifyTargets` | (포크, 2026-07-08) 분류 카테고리 `(단축키, 폴더이름)` 쌍 목록 — 기본 `[('g','good'),('b','bad')]`. Edit Classify Categories 저장 시 즉시 `save()`되며, closeEvent가 개별 기록하지 않아도 로드된 dict에 남아 종료 시에도 보존된다 |
 
-> ⚠️ `SETTING_WIN_GEOMETRY`(`window/geometry`)는 `constants.py:5`에 **정의만** 되어 있고 `closeEvent`에서는 저장되지 않는다 — 실제로 기록되는 창 키는 size/position/state뿐이다(`labelImg.py:1279-1281`).
+> ⚠️ `SETTING_WIN_GEOMETRY`(`window/geometry`)는 `constants.py:5`에 **정의만** 되어 있고 `closeEvent`에서는 저장되지 않는다 — 실제로 기록되는 창 키는 size/position/state뿐이다(`labelImg.py:1295-1297`).
 
-> ℹ️ **기록 조건**: `filename`은 단일 파일 모드에서만 실제 경로가 저장되고 폴더를 연 상태로 종료하면 `''`가 저장된다(`labelImg.py:1274-1277`). `savedir`·`lastOpenDir`도 종료 시점에 해당 경로가 존재하지 않으면 `''`로 기록된다(`labelImg.py:1286-1294`).
+> ℹ️ **기록 조건**: `filename`은 단일 파일 모드에서만 실제 경로가 저장되고 폴더를 연 상태로 종료하면 `''`가 저장된다(`labelImg.py:1290-1293`). `savedir`·`lastOpenDir`도 종료 시점에 해당 경로가 존재하지 않으면 `''`로 기록된다(`labelImg.py:1302-1310`).
 
-> ℹ️ **시작 시 우선순위 (로컬 수정, 2026-07-03)**: `labelImg.py 이미지폴더 [클래스파일] [저장폴더]` 형태로 명령줄 인자를 주고 시작하면, `__init__`(`labelImg.py:564`)이 `open_dir_dialog(dir_path=이미지폴더, silent=True)`를 호출하고 `open_dir_dialog`(`labelImg.py:1374-1377`)는 **명시된 `dir_path`를 pkl의 `lastOpenDir`보다 우선**한다. 이때 `default_save_dir`도 설정되는데, 명령줄 저장폴더 인자가 있으면 그것을 유지하고 없으면 연 폴더가 된다(`labelImg.py:1394-1397`). 따라서 pkl의 `savedir`·`lastOpenDir`는 그 세션에서 무시되고, 종료 시 새 값으로 갱신된다. pkl의 `savedir`는 명령줄 저장폴더 인자가 없을 때만 시작 시 적용된다(`labelImg.py:521-522`). (수정 전에는 pkl의 `lastOpenDir`가 명령줄 폴더보다 우선되어 라벨 XML을 찾지 못하는 문제가 있었다.)
+> ℹ️ **시작 시 우선순위 (로컬 수정, 2026-07-03)**: `labelImg.py 이미지폴더 [클래스파일] [저장폴더]` 형태로 명령줄 인자를 주고 시작하면, `__init__`(`labelImg.py:577`)이 `open_dir_dialog(dir_path=이미지폴더, silent=True)`를 호출하고 `open_dir_dialog`(`labelImg.py:1390-1393`)는 **명시된 `dir_path`를 pkl의 `lastOpenDir`보다 우선**한다. 이때 `default_save_dir`도 설정되는데, 명령줄 저장폴더 인자가 있으면 그것을 유지하고 없으면 연 폴더가 된다(`labelImg.py:1410-1413`). 따라서 pkl의 `savedir`·`lastOpenDir`는 그 세션에서 무시되고, 종료 시 새 값으로 갱신된다. pkl의 `savedir`는 명령줄 저장폴더 인자가 없을 때만 시작 시 적용된다(`labelImg.py:534-535`). (수정 전에는 pkl의 `lastOpenDir`가 명령줄 폴더보다 우선되어 라벨 XML을 찾지 못하는 문제가 있었다.)
 
 ## 기타 상수
 
