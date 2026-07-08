@@ -1,0 +1,39 @@
+name: Release
+
+# Tag push (v*) -> build the Windows exe from labelImg.spec -> create the
+# GitHub Release (auto-generated notes) with the exe + SHA256 attached.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install pyinstaller pyqt5 lxml
+      - name: Build Qt resources
+        run: pyrcc5 -o libs/resources.py resources.qrc
+      - name: Build exe (labelImg.spec bundles data/)
+        run: pyinstaller labelImg.spec
+      - name: Verify artifact and write SHA256
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist/labelImg.exe)) { exit 1 }
+          (Get-FileHash dist/labelImg.exe -Algorithm SHA256).Hash |
+            Out-File -Encoding ascii dist/labelImg.exe.sha256
+          Get-Content dist/labelImg.exe.sha256
+      - name: Create GitHub Release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/labelImg.exe
+            dist/labelImg.exe.sha256
+          generate_release_notes: true
