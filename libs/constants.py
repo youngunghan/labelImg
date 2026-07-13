@@ -15,7 +15,13 @@ SETTING_SINGLE_CLASS = 'singleclass'
 FORMAT_PASCALVOC='PascalVOC'
 FORMAT_YOLO='YOLO'
 FORMAT_CREATEML='CreateML'
+FORMAT_COCO='COCO'
 SETTING_DRAW_SQUARE = 'draw/square'
 SETTING_LABEL_FILE_FORMAT= 'labelFileFormat'
 SETTING_CLASSIFY_TARGETS = 'classifyTargets'
+# ML-assist (Phase 1c): which model backend to build, where its weights live and
+# the confidence below which a suggestion is not even shown.
+SETTING_MODEL_BACKEND = 'model/backend'
+SETTING_MODEL_PATH = 'model/path'
+SETTING_CONF_THRESHOLD = 'model/confThreshold'
 DEFAULT_ENCODING = 'utf-8'

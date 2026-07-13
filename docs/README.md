@@ -45,6 +45,7 @@
 | [explanation/architecture.md](explanation/architecture.md) | 컴포넌트 구성, MainWindow ↔ Canvas ↔ Shape ↔ I/O, Qt 시그널/슬롯 |
 | [explanation/annotation-formats.md](explanation/annotation-formats.md) | 3 포맷 설계, 포맷 전환, reader/writer 대칭, difficult/verified 의미 |
 | [explanation/canvas-interaction-model.md](explanation/canvas-interaction-model.md) | CREATE/EDIT 모드, 마우스·정점·도형 이동, 정사각형 제약, 줌/패닝 |
+| [explanation/ml-assist-architecture.md](explanation/ml-assist-architecture.md) | ⚠️**설계 문서(미구현)** — ML 어시스트 스파인: `InferenceService`·`AssistController`·`ModelBackend`, provisional 도형, 스레딩, COCO 레인, 리스크 |
 
 ## 코드 조감도 (한 줄)
 

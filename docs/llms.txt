@@ -25,6 +25,7 @@
 - [아키텍처](explanation/architecture.md): MainWindow(God-object)↔Canvas↔Shape↔I/O, Qt 시그널/슬롯
 - [어노테이션 포맷 설계](explanation/annotation-formats.md): 3포맷·전환·reader/writer 대칭·difficult/verified
 - [캔버스 상호작용 모델](explanation/canvas-interaction-model.md): CREATE/EDIT·마우스·정점이동·정사각형·줌/패닝
+- [ML 어시스트 아키텍처](explanation/ml-assist-architecture.md): ⚠️**설계 문서 — 미구현(코드 없음)**. libs/inference·libs/assist 형제 패키지, InferenceService·AssistController 컨트롤러 2개, Detection/Mask 데이터클래스 심(Shape·Qt 미노출), provisional 도형 수명주기(단일 저장 초크포인트 필터), QThreadPool 단일 워커·stale 결과 폐기, COCO 데이터셋 레인, 사각형 결합의 벽
 
 ## Source of truth
 - 코드: `labelImg.py`, `libs/*.py`, `tools/label_to_csv.py`

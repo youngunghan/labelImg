@@ -45,6 +45,9 @@ from libs.yolo_io import YoloReader, YoloParseError
 from libs.yolo_io import TXT_EXT
 from libs.create_ml_io import CreateMLReader
 from libs.create_ml_io import JSON_EXT
+from libs.coco_io import COCOReader, COCO_DEFAULT_DATASET_NAME, is_coco_json
+from libs.inference.service import InferenceService
+from libs.assist.controller import AssistController
 from libs.ustr import ustr
 from libs.hashableQListWidgetItem import HashableQListWidgetItem
 
@@ -94,6 +97,14 @@ class MainWindow(QMainWindow, WindowMixin):
         # 연 폴더로 재설정할 때 이 값이 있으면 유지한다.
         self._cli_save_dir = default_save_dir
         self.label_file_format = settings.get(SETTING_LABEL_FILE_FORMAT, LabelFileFormat.PASCAL_VOC)
+        # The format is unpickled from the settings file — a value from another
+        # build (or a corrupted one) must not reach the format dispatchers.
+        if not isinstance(self.label_file_format, LabelFileFormat):
+            self.label_file_format = LabelFileFormat.PASCAL_VOC
+        # COCO is a dataset-level format: one json for many images instead of a
+        # per-image sidecar. None means "use the default target next to the
+        # annotations" (see coco_dataset_target); Import/Export COCO... override it.
+        self.coco_dataset_path = None
 
         # For loading all image under a directory
         self.m_img_list = []
@@ -241,6 +252,13 @@ class MainWindow(QMainWindow, WindowMixin):
         edit_classes = action('Edit Default Classes', self.edit_default_classes,
                               'Ctrl+Shift+E', 'edit', 'Edit predefined class list (saved permanently)')
 
+        # (fork) COCO is dataset-level, so it needs its own entry points: the
+        # per-image Open/Save actions cannot address a dataset json.
+        import_coco = action('Import COCO...', self.import_coco_dialog,
+                             None, 'open', 'Load boxes for this image from a COCO dataset json')
+        export_coco = action('Export COCO...', self.export_coco_dialog,
+                             None, 'save', 'Merge this image into a COCO dataset json')
+
         open = action(get_str('openFile'), self.open_file,
                       'Ctrl+O', 'open', get_str('openFileDetail'))
 
@@ -276,6 +294,12 @@ class MainWindow(QMainWindow, WindowMixin):
                 return '&YOLO', 'format_yolo'
             elif format == LabelFileFormat.CREATE_ML:
                 return '&CreateML', 'format_createml'
+            elif format == LabelFileFormat.COCO:
+                return '&COCO', 'format_coco'
+            # The caller indexes [0] while building the action, so returning None
+            # for an unknown/missing format (it is unpickled from settings) would
+            # crash the app on the next launch instead of just picking a default.
+            return '&PascalVOC', 'format_voc'
 
         save_format = action(get_format_meta(self.label_file_format)[0],
                              self.change_format, 'Ctrl+Y',
@@ -413,6 +437,14 @@ class MainWindow(QMainWindow, WindowMixin):
         self.draw_squares_option.setChecked(settings.get(SETTING_DRAW_SQUARE, False))
         self.draw_squares_option.triggered.connect(self.toggle_draw_square)
 
+        # (fork) ML assist. Wiring only: the service runs the model off the UI
+        # thread, the controller owns every AI behaviour (actions, threshold,
+        # accept/reject). Both are built before the action Struct below because
+        # the controller's actions have to go into onLoadActive with the rest.
+        self.inference_service = InferenceService(self)
+        self.assist = AssistController(self, self.inference_service)
+        self.assist_actions = self.assist.create_actions()
+
         # Store actions for further handling.
         self.actions = Struct(save=save, save_format=save_format, saveAs=save_as, open=open, close=close, resetAll=reset_all, deleteImg=delete_image,
                               classifyActions=self.classify_actions, undoSort=undo_sort, editCategories=edit_categories,
@@ -432,14 +464,18 @@ class MainWindow(QMainWindow, WindowMixin):
                               beginnerContext=(create, edit, copy, delete),
                               advancedContext=(create_mode, edit_mode, edit, copy,
                                                delete, shape_line_color, shape_fill_color),
+                              assistActions=self.assist_actions,
                               onLoadActive=(
-                                  close, create, create_mode, edit_mode) + tuple(self.classify_actions),
+                                  close, create, create_mode, edit_mode)
+                              + tuple(self.classify_actions)
+                              + tuple(self.assist.load_active_actions()),
                               onShapesPresent=(save_as, hide_all, show_all))
 
         self.menus = Struct(
             file=self.menu(get_str('menu_file')),
             edit=self.menu(get_str('menu_edit')),
             view=self.menu(get_str('menu_view')),
+            ai=self.menu('&AI'),
             help=self.menu(get_str('menu_help')),
             recentFiles=QMenu(get_str('menu_openRecent')),
             labelList=label_menu)
@@ -462,9 +498,10 @@ class MainWindow(QMainWindow, WindowMixin):
         self.display_label_option.triggered.connect(self.toggle_paint_labels_option)
 
         add_actions(self.menus.file,
-                    (open, open_dir, change_save_dir, open_annotation, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image)
+                    (open, open_dir, change_save_dir, open_annotation, import_coco, export_coco, copy_prev_bounding, self.menus.recentFiles, save, save_format, save_as, close, reset_all, delete_image)
                     + tuple(self.classify_actions)
                     + (undo_sort, edit_categories, edit_classes, quit))
+        add_actions(self.menus.ai, tuple(self.assist_actions))
         add_actions(self.menus.help, (help_default, show_info, show_shortcut))
         add_actions(self.menus.view, (
             self.auto_saving,
@@ -605,16 +642,49 @@ class MainWindow(QMainWindow, WindowMixin):
             self.label_file_format = LabelFileFormat.CREATE_ML
             LabelFile.suffix = JSON_EXT
 
+        elif save_format == FORMAT_COCO:
+            self.actions.save_format.setText(FORMAT_COCO)
+            self.actions.save_format.setIcon(new_icon("format_coco"))
+            self.label_file_format = LabelFileFormat.COCO
+            LabelFile.suffix = JSON_EXT
+
     def change_format(self):
         if self.label_file_format == LabelFileFormat.PASCAL_VOC:
             self.set_format(FORMAT_YOLO)
         elif self.label_file_format == LabelFileFormat.YOLO:
             self.set_format(FORMAT_CREATEML)
         elif self.label_file_format == LabelFileFormat.CREATE_ML:
+            self.set_format(FORMAT_COCO)
+        elif self.label_file_format == LabelFileFormat.COCO:
             self.set_format(FORMAT_PASCALVOC)
         else:
             raise ValueError('Unknown label file format.')
         self.set_dirty()
+
+    @staticmethod
+    def is_same_path(left, right):
+        # Windows paths are case-insensitive, so a plain != would treat
+        # C:\dir\annotations.json and c:\dir\Annotations.json as two datasets.
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+    def coco_dataset_target(self, file_path=None):
+        """Path of the single COCO dataset json this session writes into.
+
+        Unlike the other formats there is no per-image sidecar to derive from
+        the image stem, so the target is a fixed dataset file: whatever the user
+        picked via Import/Export COCO..., else annotations.json in the save dir
+        (falling back to the image's own directory when no save dir is set).
+        """
+        if self.coco_dataset_path:
+            return self.coco_dataset_path
+
+        base_dir = self.default_save_dir
+        if not base_dir:
+            reference_path = file_path or self.file_path
+            base_dir = os.path.dirname(reference_path) if reference_path else None
+        if not base_dir:
+            return None
+        return os.path.join(ustr(base_dir), COCO_DEFAULT_DATASET_NAME)
 
     def no_shapes(self):
         return not self.items_to_shapes
@@ -670,6 +740,10 @@ class MainWindow(QMainWindow, WindowMixin):
             z.setEnabled(value)
         for action in self.actions.onLoadActive:
             action.setEnabled(value)
+        # Must come AFTER the loop above: an image being open is necessary but
+        # not sufficient for the AI actions (no model backend => they stay off),
+        # and the loop would have just re-enabled them.
+        self.assist.refresh_actions()
 
     def queue_event(self, function):
         QTimer.singleShot(0, function)
@@ -687,6 +761,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.reset_state()
         self.label_coordinates.clear()
         self.combo_box.cb.clear()
+        # The canvas and the label list are already gone; the controller only has
+        # to drop the suggestions it was tracking (removing them again here would
+        # be a double removal). Guarded: reset_state may run before __init__ has
+        # built the controller.
+        if getattr(self, 'assist', None) is not None:
+            self.assist.forget_suggestions()
 
     def current_item(self):
         items = self.label_list.selectedItems()
@@ -927,7 +1007,14 @@ class MainWindow(QMainWindow, WindowMixin):
                         # add chris
                         difficult=s.difficult)
 
-        shapes = [format_shape(shape) for shape in self.canvas.shapes]
+        # THE provisional filter. save_labels is the single choke point every
+        # writer goes through — Ctrl+S, Save As, Export COCO..., verify_image,
+        # and autosave on BOTH open_next_image and open_prev_image all reach the
+        # formats via _save_file -> save_labels — so this one line is what keeps
+        # a model's un-accepted guess out of every annotation file, in every
+        # format. A suggestion becomes saveable only when the user accepts it
+        # (AssistController.accept_all clears `provisional`).
+        shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.provisional]
         # Can add different annotation formats here
         try:
             if self.label_file_format == LabelFileFormat.PASCAL_VOC:
@@ -945,6 +1032,18 @@ class MainWindow(QMainWindow, WindowMixin):
                     annotation_file_path += JSON_EXT
                 self.label_file.save_create_ml_format(annotation_file_path, shapes, self.file_path, self.image_data,
                                                       self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+            elif self.label_file_format == LabelFileFormat.COCO:
+                # Dataset lane: ignore the per-image path the caller derived from
+                # the image stem — a COCO dataset is one json covering many
+                # images, so this image is merged into the fixed dataset target
+                # instead of getting a <stem>.json sidecar of its own.
+                dataset_path = self.coco_dataset_target()
+                if dataset_path is None:
+                    raise LabelFileError('No COCO dataset target — set a save directory '
+                                         'or pick one with File > Export COCO...')
+                annotation_file_path = dataset_path
+                self.label_file.save_coco_format(annotation_file_path, shapes, self.file_path, self.image_data,
+                                                 self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
             else:
                 # LabelFile.save is disabled (commented out) — fail loudly here.
                 raise LabelFileError('Unsupported label file format: %s' % self.label_file_format)
@@ -1218,6 +1317,8 @@ class MainWindow(QMainWindow, WindowMixin):
         return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
 
     def show_bounding_box_from_annotation_file(self, file_path):
+        coco_path = self.coco_dataset_target(file_path)
+
         if self.default_save_dir is not None:
             basename = os.path.basename(os.path.splitext(file_path)[0])
             xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
@@ -1232,7 +1333,13 @@ class MainWindow(QMainWindow, WindowMixin):
             elif os.path.isfile(txt_path):
                 self.load_yolo_txt_by_filename(txt_path)
             elif os.path.isfile(json_path):
-                self.load_create_ml_json_by_filename(json_path, file_path)
+                self.load_json_by_filename(json_path, file_path)
+            elif coco_path is not None and os.path.isfile(coco_path):
+                # Last: COCO has no per-image sidecar, so the dataset json is the
+                # only place its boxes can live. It is only adopted when it really
+                # holds an entry for this image (see load_coco_json_by_filename),
+                # so an unrelated annotations.json cannot hijack the format.
+                self.load_coco_json_by_filename(coco_path, file_path)
 
         else:
             xml_path = os.path.splitext(file_path)[0] + XML_EXT
@@ -1244,8 +1351,10 @@ class MainWindow(QMainWindow, WindowMixin):
             elif os.path.isfile(txt_path):
                 self.load_yolo_txt_by_filename(txt_path)
             elif os.path.isfile(json_path):
-                self.load_create_ml_json_by_filename(json_path, file_path)
-            
+                self.load_json_by_filename(json_path, file_path)
+            elif coco_path is not None and os.path.isfile(coco_path):
+                self.load_coco_json_by_filename(coco_path, file_path)
+
 
     def resizeEvent(self, event):
         if self.canvas and not self.image.isNull()\
@@ -1314,6 +1423,11 @@ class MainWindow(QMainWindow, WindowMixin):
         settings[SETTING_PAINT_LABEL] = self.display_label_option.isChecked()
         settings[SETTING_DRAW_SQUARE] = self.draw_squares_option.isChecked()
         settings[SETTING_LABEL_FILE_FORMAT] = self.label_file_format
+        # ML assist: the backend/model choice round-trips (there is no picker UI
+        # yet, so it is config-file driven), the threshold is a live UI control.
+        settings[SETTING_MODEL_BACKEND] = self.assist.backend_name
+        settings[SETTING_MODEL_PATH] = self.assist.model_path
+        settings[SETTING_CONF_THRESHOLD] = self.assist.threshold
         settings.save()
 
     def load_recent(self, filename):
@@ -1369,16 +1483,18 @@ class MainWindow(QMainWindow, WindowMixin):
                     filename = filename[0]
             self.load_pascal_xml_by_filename(filename)
 
-        elif self.label_file_format == LabelFileFormat.CREATE_ML:
-            
+        elif self.label_file_format in (LabelFileFormat.CREATE_ML, LabelFileFormat.COCO):
+
             filters = "Open Annotation JSON file (%s)" % ' '.join(['*.json'])
             filename = ustr(QFileDialog.getOpenFileName(self, '%s - Choose a json file' % __appname__, path, filters))
             if filename:
                 if isinstance(filename, (tuple, list)):
                     filename = filename[0]
 
-            self.load_create_ml_json_by_filename(filename, self.file_path)         
-        
+            # Both CreateML and COCO use .json — the chosen file decides which
+            # reader runs, not the currently selected format.
+            self.load_json_by_filename(filename, self.file_path)
+
 
     def open_dir_dialog(self, _value=False, dir_path=None, silent=False):
         if not self.may_continue():
@@ -1517,6 +1633,17 @@ class MainWindow(QMainWindow, WindowMixin):
             self.load_file(filename)
 
     def save_file(self, _value=False):
+        # COCO does not derive a path from the image stem — it always merges into
+        # the one dataset json (this is also what autosave hits, so no per-image
+        # <stem>.json sidecar is ever written).
+        if self.label_file_format == LabelFileFormat.COCO:
+            dataset_path = self.coco_dataset_target()
+            if dataset_path is None:
+                self.status('Select an image or a save directory before saving COCO')
+                return
+            self._save_file(dataset_path)
+            return
+
         if self.default_save_dir is not None and len(ustr(self.default_save_dir)):
             if self.file_path:
                 image_file_name = os.path.basename(self.file_path)
@@ -1533,6 +1660,12 @@ class MainWindow(QMainWindow, WindowMixin):
 
     def save_file_as(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
+        # "Save As" in the COCO lane means "pick another dataset json", which is
+        # exactly Export COCO... — the generic dialog would hand back a per-image
+        # path that save_labels has to ignore.
+        if self.label_file_format == LabelFileFormat.COCO:
+            self.export_coco_dialog()
+            return
         self._save_file(self.save_file_dialog())
 
     def save_file_dialog(self, remove_ext=True):
@@ -1556,6 +1689,10 @@ class MainWindow(QMainWindow, WindowMixin):
     def _save_file(self, annotation_file_path):
         if annotation_file_path and self.save_labels(annotation_file_path):
             self.set_clean()
+            if self.label_file_format == LabelFileFormat.COCO:
+                # save_labels redirected the write to the dataset json; report
+                # where the data actually landed, not the path passed in.
+                annotation_file_path = self.coco_dataset_target() or annotation_file_path
             self.statusBar().showMessage('Saved to  %s' % annotation_file_path)
             self.statusBar().show()
 
@@ -2026,6 +2163,18 @@ class MainWindow(QMainWindow, WindowMixin):
                         % (t_yolo_parse_reader.skipped_lines, os.path.basename(txt_path)))
         self.canvas.verified = t_yolo_parse_reader.verified
 
+    def load_json_by_filename(self, json_path, file_path):
+        # CreateML and COCO share the .json extension, so the extension cannot
+        # pick the reader — sniff the content first. CreateMLReader only guards
+        # against a decode error, and would quietly return zero shapes for a COCO
+        # dataset instead of rejecting it.
+        if not json_path or os.path.isfile(json_path) is False:
+            return
+        if is_coco_json(json_path):
+            self.load_coco_json_by_filename(json_path, file_path)
+        else:
+            self.load_create_ml_json_by_filename(json_path, file_path)
+
     def load_create_ml_json_by_filename(self, json_path, file_path):
         if self.file_path is None:
             return
@@ -2038,6 +2187,85 @@ class MainWindow(QMainWindow, WindowMixin):
         shapes = create_ml_parse_reader.get_shapes()
         self.load_labels(shapes)
         self.canvas.verified = create_ml_parse_reader.verified
+
+    def load_coco_json_by_filename(self, json_path, file_path):
+        """Load this image's boxes out of a COCO dataset json.
+
+        Returns False when the dataset does not list this image — the format is
+        then left alone, so a dataset that happens to sit in the save directory
+        cannot switch the app to COCO for images it knows nothing about.
+        """
+        if self.file_path is None:
+            return False
+        if os.path.isfile(json_path) is False:
+            return False
+
+        coco_parse_reader = COCOReader(json_path, file_path)
+        if not coco_parse_reader.found_image:
+            return False
+
+        self.set_format(FORMAT_COCO)
+        # Pin the dataset only when it is not the default target: the default is
+        # recomputed from the save dir on every call, so pinning it would make a
+        # later "Change Save Dir" keep writing into the old folder.
+        default_target = self.coco_dataset_target(file_path)
+        if default_target is None or not self.is_same_path(json_path, default_target):
+            self.coco_dataset_path = json_path
+        self.load_labels(coco_parse_reader.get_shapes())
+        self.canvas.verified = coco_parse_reader.verified
+        return True
+
+    def import_coco_dialog(self, _value=False):
+        if self.file_path is None:
+            self.statusBar().showMessage('Please select image first')
+            self.statusBar().show()
+            return
+
+        target = self.coco_dataset_target()
+        path = os.path.dirname(target) if target else self.current_path()
+        filters = "COCO dataset JSON (%s)" % ' '.join(['*.json'])
+        filename, _ = QFileDialog.getOpenFileName(
+            self, '%s - Choose a COCO dataset json' % __appname__, path, filters)
+        if not filename:
+            return
+        filename = ustr(filename)
+
+        if not is_coco_json(filename):
+            self.error_message(u'Error opening COCO dataset',
+                               u'<b>"%s" is not a COCO dataset json.</b>'
+                               % os.path.basename(filename))
+            return
+
+        # Adopt it as the dataset target even if this image is not in it yet, so
+        # the next save merges into the dataset the user just chose.
+        self.coco_dataset_path = filename
+        self.set_format(FORMAT_COCO)
+        if not self.load_coco_json_by_filename(filename, self.file_path):
+            self.status('No annotations for %s in %s'
+                        % (os.path.basename(self.file_path), os.path.basename(filename)))
+
+    def export_coco_dialog(self, _value=False):
+        if self.file_path is None:
+            self.statusBar().showMessage('Please select image first')
+            self.statusBar().show()
+            return
+
+        target = self.coco_dataset_target() or os.path.join(self.current_path(),
+                                                            COCO_DEFAULT_DATASET_NAME)
+        filters = "COCO dataset JSON (%s)" % ' '.join(['*.json'])
+        filename, _ = QFileDialog.getSaveFileName(
+            self, '%s - Choose a COCO dataset json' % __appname__, target, filters)
+        if not filename:
+            return
+        filename = ustr(filename)
+        if filename[-5:].lower() != JSON_EXT:
+            filename += JSON_EXT
+
+        # Merges the current image into the chosen dataset (creating it if
+        # needed) and keeps it as the target for subsequent saves.
+        self.coco_dataset_path = filename
+        self.set_format(FORMAT_COCO)
+        self._save_file(filename)
 
     def copy_previous_bounding_boxes(self):
         # Guard: a standalone image (Open File) isn't in m_img_list; list.index would ValueError.

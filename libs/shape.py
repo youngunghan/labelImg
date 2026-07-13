@@ -25,6 +25,14 @@ class Shape(object):
 
     MOVE_VERTEX, NEAR_VERTEX = range(2)
 
+    # Geometry kinds. Phase 1 draws rectangles only; POLYGON/POINT/LINE exist so
+    # that the segmentation phase can add a kind without re-typing every shape
+    # already on a canvas (and so nothing else has to guess from len(points)).
+    RECT = 'rectangle'
+    POLYGON = 'polygon'
+    POINT = 'point'
+    LINE = 'line'
+
     # The following class variables influence the drawing
     # of _all_ shape objects.
     line_color = DEFAULT_LINE_COLOR
@@ -38,13 +46,22 @@ class Shape(object):
     scale = 1.0
     label_font_size = 8
 
-    def __init__(self, label=None, line_color=None, difficult=False, paint_label=False):
+    def __init__(self, label=None, line_color=None, difficult=False, paint_label=False,
+                 shape_type=None):
         self.label = label
         self.points = []
         self.fill = False
         self.selected = False
         self.difficult = difficult
         self.paint_label = paint_label
+        # A model's guess, not the user's data: provisional shapes are drawn
+        # differently (see paint) and are filtered out at the single save choke
+        # point (MainWindow.save_labels), so they can never reach an annotation
+        # file until the user accepts them. Confidence is kept alongside so the
+        # AI layer can re-filter what is on screen without re-running the model.
+        self.provisional = False
+        self.confidence = None
+        self.shape_type = shape_type or Shape.RECT
 
         self._highlight_index = None
         self._highlight_mode = self.NEAR_VERTEX
@@ -90,6 +107,10 @@ class Shape(object):
             pen = QPen(color)
             # Try using integer sizes for smoother drawing(?)
             pen.setWidth(max(1, int(round(2.0 / self.scale))))
+            if self.provisional:
+                # A suggestion must never be mistakable for a committed box: it
+                # is not in the label file and will not be saved unless accepted.
+                pen.setStyle(Qt.DashLine)
             painter.setPen(pen)
 
             line_path = QPainterPath()
@@ -108,6 +129,11 @@ class Shape(object):
                 line_path.lineTo(self.points[0])
 
             painter.drawPath(line_path)
+            if self.provisional:
+                # Vertices stay solid — only the outline carries the dash.
+                solid_pen = QPen(color)
+                solid_pen.setWidth(max(1, int(round(2.0 / self.scale))))
+                painter.setPen(solid_pen)
             painter.drawPath(vertex_path)
             painter.fillPath(vertex_path, self.vertex_fill_color)
 
@@ -130,7 +156,10 @@ class Shape(object):
                         min_y += min_y_label
                     painter.drawText(int(min_x), int(min_y), self.label)
 
-            if self.fill:
+            # A provisional shape is always filled (translucently, see
+            # libs/assist/suggestion.py), not only while hovered/selected: the
+            # dashed outline alone is easy to miss on a busy image.
+            if self.fill or self.provisional:
                 color = self.select_fill_color if self.selected else self.fill_color
                 painter.fillPath(line_path, color)
 
@@ -187,6 +216,11 @@ class Shape(object):
         self._highlight_index = None
 
     def copy(self):
+        # HAND-ROLLED FIELD WHITELIST: every attribute must be listed here or it
+        # is silently dropped by Ctrl+D / copy-here. Dropping `provisional` would
+        # be worse than cosmetic — the duplicate would come back as a *committed*
+        # box and get written to the annotation file, i.e. a copied suggestion
+        # would become ground truth behind the user's back.
         shape = Shape("%s" % self.label)
         shape.points = [p for p in self.points]
         shape.fill = self.fill
@@ -197,6 +231,9 @@ class Shape(object):
         if self.fill_color != Shape.fill_color:
             shape.fill_color = self.fill_color
         shape.difficult = self.difficult
+        shape.provisional = self.provisional
+        shape.confidence = self.confidence
+        shape.shape_type = self.shape_type
         return shape
 
     def __len__(self):
