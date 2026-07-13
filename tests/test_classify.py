@@ -85,6 +85,33 @@ class TestClassifyWorkflow(unittest.TestCase):
         self.assertEqual(2, len(self.win.classify_history[0]))
         self.assertEqual([], self.errors)
 
+    def test_classify_leaves_the_shared_coco_dataset_in_place_and_says_so(self):
+        # COCO is a DATASET-level format: the boxes live in one json shared by
+        # every image, not in a sidecar named after this one. Two things must
+        # hold. (1) The dataset must not be moved: with a target the user picked
+        # as `a.json` (Export COCO...), the sidecar loop's `stem + ext` match
+        # would otherwise drag the whole dataset — every other image's boxes —
+        # into photos_good. (2) The user has to be told the boxes stayed behind,
+        # rather than discovering it later.
+        import json
+        from libs.labelFile import LabelFileFormat
+
+        dataset = self.path(self.dir, 'a.json')  # worst case: stem == image stem
+        with open(dataset, 'w', encoding='utf-8') as f:
+            json.dump({'images': [{'id': 1, 'file_name': 'a.png', 'width': 16, 'height': 16}],
+                       'annotations': [], 'categories': []}, f)
+        self.win.label_file_format = LabelFileFormat.COCO
+        self.win.coco_dataset_path = dataset
+
+        self.win.classify_current_image('good')
+
+        self.assertTrue(os.path.isfile(dataset), 'the shared COCO dataset was moved away')
+        self.assertFalse(os.path.exists(self.path(self.good_dir, 'a.json')))
+        self.assertTrue(os.path.isfile(self.path(self.good_dir, 'a.png')))
+        self.assertIn('COCO dataset entry left in place',
+                      self.win.statusBar().currentMessage())
+        self.assertEqual([], self.errors)
+
     def test_classify_renames_on_collision(self):
         os.makedirs(self.good_dir)
         with open(self.path(self.good_dir, 'a.png'), 'w') as f:

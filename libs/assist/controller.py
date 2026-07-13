@@ -78,9 +78,19 @@ class AssistController(QObject):
         # Detections for the current image, kept whole (unfiltered) so that
         # moving the threshold re-filters what is on screen WITHOUT re-running
         # the model. `_shapes` maps detection index -> the Shape currently
-        # showing it (absent = filtered out / never shown).
+        # showing it (absent = filtered out / never shown / dismissed).
         self._detections = []
         self._shapes = {}
+        # Detection indices the user removed by hand ("Delete RectBox" on a
+        # suggestion). Without this, the next _sync_suggestions would see "index
+        # above threshold, no shape" and put the box the user just deleted
+        # straight back on the canvas.
+        self._dismissed = set()
+        # The shape this controller is currently removing. remove_label reports
+        # EVERY removal back to us (discard_shape); this is how the ones we asked
+        # for are told apart from the user's own, which must not be mistaken for
+        # a dismissal.
+        self._removing = None
 
         self.action_auto = None
         self.action_accept = None
@@ -311,9 +321,45 @@ class AssistController(QObject):
     # -- suggestions -------------------------------------------------------
 
     def provisional_shapes(self):
-        """The suggestion shapes currently on the canvas, in detection order."""
-        return [self._shapes[i] for i in sorted(self._shapes)
-                if self._shapes[i].provisional]
+        """Every suggestion currently ON THE CANVAS, in canvas order.
+
+        Read from the canvas, not from `_shapes`, because `_shapes` is not the
+        truth about what is on screen and cannot be:
+
+        * a suggestion can LEAVE the canvas without this controller (the ordinary
+          "Delete RectBox" action), which used to leave a stale Shape in
+          `_shapes` -- and the next threshold change would then hand that dead
+          shape to canvas.delete_selected(), i.e. list.remove(x) with x not in
+          the list: ValueError, mid-drag, on the slider;
+        * a suggestion can ARRIVE on the canvas without this controller (Ctrl+D:
+          Shape.copy() faithfully clones `provisional`), and such a copy has no
+          detection index, so tracking-based bulk actions could never see it --
+          it stayed a dashed, unsaveable phantom no Accept/Reject All could reach.
+
+        Reading the canvas makes Accept All / Reject All act on exactly what the
+        user sees. `_shapes` keeps its one real job: mapping a detection to the
+        shape showing it, so the threshold can re-filter without re-inferring.
+        """
+        return [shape for shape in self.app.canvas.shapes if shape.provisional]
+
+    def discard_shape(self, shape):
+        """A shape was removed from the canvas -- drop any tracking of it.
+
+        MainWindow.remove_label calls this for EVERY shape it removes, so it must
+        be a no-op for shapes we never tracked. Removals we did not ask for are
+        the user deleting a suggestion by hand: that detection is recorded as
+        dismissed, so a later threshold move re-filters the others without
+        resurrecting the box the user just deleted.
+        """
+        ours = shape is self._removing
+        for index in [i for i, tracked in list(self._shapes.items()) if tracked is shape]:
+            del self._shapes[index]
+            if not ours and shape.provisional:
+                self._dismissed.add(index)
+        if not ours:
+            # The canvas has already dropped it, so Accept/Reject All may have
+            # just become meaningless.
+            self.refresh_actions()
 
     def _sync_suggestions(self):
         """Make what is on the canvas match (detections, threshold).
@@ -324,6 +370,8 @@ class AssistController(QObject):
         """
         new_shapes = []
         for index, detection in enumerate(self._detections):
+            if index in self._dismissed:
+                continue  # the user deleted this one by hand; do not bring it back
             above = float(detection.score) >= self.threshold
             shape = self._shapes.get(index)
 
@@ -335,7 +383,9 @@ class AssistController(QObject):
                 if not shape.provisional:
                     continue  # accepted: it is the user's box now, not ours
                 self._remove_shape(shape, mark_dirty=False)
-                del self._shapes[index]
+                # pop, not del: _remove_shape goes through remove_label, which
+                # reports back into discard_shape and may already have dropped it.
+                self._shapes.pop(index, None)
 
         if new_shapes:
             canvas = self.app.canvas
@@ -400,6 +450,7 @@ class AssistController(QObject):
     def _forget(self):
         self._detections = []
         self._shapes = {}
+        self._dismissed = set()
 
     def _remove_shape(self, shape, mark_dirty):
         """Remove a shape through the app's own removal path.
@@ -415,11 +466,23 @@ class AssistController(QObject):
         unsaved.
         """
         app = self.app
+        if shape not in app.canvas.shapes:
+            # Already gone (removed out of band, e.g. by load_labels replacing the
+            # canvas wholesale). canvas.delete_selected() would reach
+            # list.remove(x) with x not in the list -> ValueError. Drop the
+            # tracking instead; there is nothing left to remove.
+            self.discard_shape(shape)
+            return
+
         was_dirty = app.dirty
 
-        app.canvas.select_shape(shape)
-        app.delete_selected_shape()  # remove_label + set_dirty + onShapesPresent
-        app.canvas.de_select_shape()
+        self._removing = shape
+        try:
+            app.canvas.select_shape(shape)
+            app.delete_selected_shape()  # remove_label + set_dirty + onShapesPresent
+            app.canvas.de_select_shape()
+        finally:
+            self._removing = None
 
         if not mark_dirty and not was_dirty:
             app.dirty = False

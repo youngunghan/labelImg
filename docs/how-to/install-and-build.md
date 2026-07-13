@@ -2,7 +2,10 @@
 
 ## 의존성
 
-- Python 3 이상(권장). `setup.py`의 `REQUIRES_PYTHON='>=3.0.0'`.
+- **Python 3.7 이상**. `setup.py`의 `REQUIRES_PYTHON='>=3.7'`.
+  - 3.7이 하한인 이유: `labelImg.py`가 모듈 최상단에서 `libs.inference`·`libs.assist`를 import하고,
+    이들이 `from __future__ import annotations`(3.7+)와 `dataclasses`(3.7+)를 쓴다. 3.6 이하에서는
+    AI 기능만 빠지는 게 아니라 `import labelImg` 자체가 SyntaxError/ImportError로 실패한다.
 - `pyqt5`, `lxml`.
 - 핀 고정(`requirements/requirements-linux-python3.txt`): `pyqt5==5.14.1`, `lxml==4.9.1`.
   - (루트 README 본문은 `pyqt5==5.15.2`를 권장한다 — 핀은 재현용, 본문은 일반 권장값.)

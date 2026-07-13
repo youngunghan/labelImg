@@ -134,5 +134,11 @@ def build_backend(config: Optional[Mapping[str, Any]] = None) -> Optional[ModelB
     except Exception as exc:  # noqa: BLE001 - deliberate: never crash the app
         # Bad model path, unreadable weights, nonsense config...  The AI feature
         # is optional; degrading to "disabled" always beats killing the editor.
-        logger.warning('Inference backend %r failed to initialise: %s', name, exc)
+        # exc_info: unlike the two expected branches above, anything landing here
+        # may be an actual bug in a factory (a typo, a bad signature). Without the
+        # traceback the log line is indistinguishable from "extras not installed"
+        # and the bug is undebuggable -- while the app still degrades to
+        # "AI disabled" exactly as designed.
+        logger.warning('Inference backend %r failed to initialise: %s', name, exc,
+                       exc_info=True)
         return None

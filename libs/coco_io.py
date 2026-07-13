@@ -31,6 +31,54 @@ def _empty_dataset():
     return {'images': [], 'annotations': [], 'categories': []}
 
 
+def dataset_relative_name(image_path, dataset_path):
+    """The images[] key for one image inside one dataset json: the image's path
+    RELATIVE to that json's directory, with forward slashes.
+
+    A bare basename is not enough. labelImg scans a directory tree *recursively*
+    (MainWindow.scan_all_images walks with os.walk), so ``train/0001.jpg`` and
+    ``val/0001.jpg`` are two different images sharing one basename — and a
+    dataset keyed on the basename lets them overwrite each other's images[]
+    entry and union each other's annotations on read. Recursive directory + one
+    shared dataset file is exactly the workflow this format exists for, so that
+    collision is a silent data-corruption path, not a corner case.
+
+    Falls back to the basename when the relation cannot be computed (either path
+    is relative, or they sit on different Windows drives): no worse than before,
+    and the reader's basename fallback still finds such an entry.
+    """
+    image_path = str(image_path or '')
+    dataset_path = str(dataset_path or '')
+    if not image_path or not dataset_path:
+        return os.path.basename(image_path)
+    if not (os.path.isabs(image_path) and os.path.isabs(dataset_path)):
+        return os.path.basename(image_path)
+    try:
+        relative = os.path.relpath(image_path, os.path.dirname(dataset_path))
+    except ValueError:
+        # Windows: no relative path exists across drives (C: -> D:).
+        return os.path.basename(image_path)
+    return _to_posix(relative)
+
+
+def _to_posix(path):
+    path = str(path).replace(os.sep, '/')
+    if os.altsep:
+        path = path.replace(os.altsep, '/')
+    return path
+
+
+def _match_key(file_name):
+    """Normalise a file_name for comparison: forward slashes, and case-folded on
+    the platforms whose paths are case-insensitive (Windows)."""
+    return os.path.normcase(_to_posix(file_name))
+
+
+def _is_bare_name(file_name):
+    """True when file_name carries no directory part (the old/other-tool key)."""
+    return '/' not in file_name and '\\' not in file_name
+
+
 def is_coco_dict(data):
     """Sniff already-parsed json content: COCO dataset vs CreateML.
 
@@ -112,20 +160,54 @@ class COCOWriter:
                 next_id += 1
         return name_to_id
 
-    def sync_image(self, dataset):
-        """Return the image id for this image, adding an images[] entry if new."""
-        height, width = self.img_size[0], self.img_size[1]
+    def file_name_for(self, target_file):
+        """This image's images[] key in ``target_file``'s dataset.
 
+        Dataset-relative (see dataset_relative_name), so two images with the same
+        basename in different subfolders get one entry each. `self.filename` (a
+        basename) is only the fallback for a writer built without an image path.
+        """
+        if self.local_img_path:
+            return dataset_relative_name(self.local_img_path, target_file)
+        return self.filename
+
+    def sync_image(self, dataset, target_file=None):
+        """Return the image id for this image, adding an images[] entry if new.
+
+        Matching is on the dataset-relative file_name. A dataset written by an
+        older labelImg (or by another tool) may key the image on a bare basename;
+        such an entry is adopted *and migrated* to the relative name — but only
+        when it is the single candidate, so that a second image with the same
+        basename cannot latch onto the entry that now belongs to the first.
+        """
+        height, width = self.img_size[0], self.img_size[1]
+        file_name = self.file_name_for(target_file)
+        wanted = _match_key(file_name)
+        wanted_base = _match_key(os.path.basename(_to_posix(file_name)))
+
+        legacy = []
         for image in dataset['images']:
-            if image.get('file_name') == self.filename and image.get('id') is not None:
+            if image.get('id') is None:
+                continue
+            name = str(image.get('file_name', ''))
+            if _match_key(name) == wanted:
                 image['width'] = width
                 image['height'] = height
                 return image['id']
+            if _is_bare_name(name) and _match_key(name) == wanted_base:
+                legacy.append(image)
+
+        if len(legacy) == 1:
+            image = legacy[0]
+            image['file_name'] = file_name
+            image['width'] = width
+            image['height'] = height
+            return image['id']
 
         image_id = max([image.get('id', 0) for image in dataset['images']] or [0]) + 1
         dataset['images'].append({
             'id': image_id,
-            'file_name': self.filename,
+            'file_name': file_name,
             'width': width,
             'height': height,
         })
@@ -143,7 +225,7 @@ class COCOWriter:
             dataset = _empty_dataset()
 
         name_to_id = self.sync_categories(dataset, class_list)
-        image_id = self.sync_image(dataset)
+        image_id = self.sync_image(dataset, target_file)
 
         # Drop only this image's annotations; every other image keeps its own.
         dataset['annotations'] = [annotation for annotation in dataset['annotations']
@@ -182,6 +264,10 @@ class COCOReader:
         self.shapes = []
         self.json_path = json_path
         self.filename = os.path.basename(file_path)
+        # The dataset-relative key this image is stored under (see
+        # dataset_relative_name); degrades to the basename when the paths cannot
+        # be related, in which case only the basename fallback below can match.
+        self.relative_name = dataset_relative_name(file_path, json_path)
         # COCO has no verified flag (CreateML does); report False rather than
         # letting the canvas keep another file's verified state.
         self.verified = False
@@ -203,13 +289,28 @@ class COCOReader:
             if category.get('id') is not None:
                 id_to_name[category['id']] = category.get('name', '')
 
+        wanted = _match_key(self.relative_name)
+        wanted_base = _match_key(self.filename)
+
         image_ids = set()
+        by_basename = set()
         for image in dataset['images']:
-            # file_name may carry a directory prefix in datasets exported by
-            # other tools — match on the basename, like CreateMLReader does.
-            file_name = os.path.basename(str(image.get('file_name', '')))
-            if file_name == self.filename and image.get('id') is not None:
+            if image.get('id') is None:
+                continue
+            file_name = str(image.get('file_name', ''))
+            if _match_key(file_name) == wanted:
                 image_ids.add(image['id'])
+            elif _match_key(os.path.basename(_to_posix(file_name))) == wanted_base:
+                by_basename.add(image['id'])
+
+        if not image_ids and len(by_basename) == 1:
+            # Fallback for a dataset authored elsewhere, whose file_name is
+            # relative to *its* root rather than to this json (or is a bare
+            # basename). Only when it picks out exactly ONE image: two entries
+            # sharing a basename (train/0001.jpg, val/0001.jpg) are precisely the
+            # collision the relative key exists to prevent, and unioning their
+            # annotations — what this reader used to do — cross-contaminates both.
+            image_ids = by_basename
 
         if not image_ids:
             return

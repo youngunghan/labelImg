@@ -9,6 +9,7 @@ that is precisely what these tests exist to catch.
 
 import dataclasses
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -355,6 +356,51 @@ class TestZeroDependencyImport(unittest.TestCase):
         self.assertEqual(0, proc.returncode, proc.stderr)
         self.assertEqual('False', proc.stdout.strip(),
                          'importing the package must not import concrete backends')
+
+
+class TestDeclaredPythonSupport(unittest.TestCase):
+    """This package is 3.7+ and the metadata has to say so.
+
+    libs/inference uses `from __future__ import annotations` (3.7) and
+    dataclasses (3.7), and labelImg.py imports libs.inference.service /
+    libs.assist.controller unconditionally at module top. On a 3.3-3.6
+    interpreter that is not "the AI feature is unavailable", it is
+    `import labelImg` raising SyntaxError/ImportError -- the whole editor, dead.
+    setup.py promised >=3.0.0 and classified 3.3-3.6, so the package would have
+    installed happily onto an interpreter it can no longer run on.
+    """
+
+    def setUp(self):
+        with open(os.path.join(REPO_ROOT, 'setup.py'), 'r', encoding='utf-8') as file:
+            self.setup_py = file.read()
+
+    def test_requires_python_is_at_least_3_7(self):
+        match = re.search(r"^REQUIRES_PYTHON\s*=\s*'([^']+)'", self.setup_py, re.M)
+        self.assertIsNotNone(match, 'REQUIRES_PYTHON is gone from setup.py')
+        spec = match.group(1).strip()
+        self.assertTrue(spec.startswith('>='), 'unexpected specifier: %s' % spec)
+        version = tuple(int(part) for part in spec[2:].strip().split('.'))
+        self.assertGreaterEqual(version, (3, 7),
+                                'setup.py still promises Python %s, which cannot '
+                                'import libs.inference' % spec)
+
+    def test_no_classifier_below_3_7(self):
+        classifiers = re.findall(
+            r"'Programming Language :: Python :: (\d+)\.(\d+)'", self.setup_py)
+        self.assertTrue(classifiers, 'no versioned Python classifiers found')
+        for major, minor in classifiers:
+            self.assertGreaterEqual(
+                (int(major), int(minor)), (3, 7),
+                'setup.py still classifies Python %s.%s' % (major, minor))
+
+    def test_the_3_7_only_syntax_that_forces_the_floor_is_really_there(self):
+        # Keeps the two tests above honest: if this ever stops being true, the
+        # floor can be revisited deliberately instead of by accident.
+        types_py = os.path.join(REPO_ROOT, 'libs', 'inference', 'types.py')
+        with open(types_py, 'r', encoding='utf-8') as file:
+            source = file.read()
+        self.assertIn('from __future__ import annotations', source)
+        self.assertIn('from dataclasses import', source)
 
 
 if __name__ == '__main__':

@@ -378,6 +378,186 @@ class TestNoBackend(AssistTestCase):
         self.assertTrue(os.path.isfile(xml_path))
 
 
+class TestOutOfBandRemoval(AssistTestCase):
+    """A suggestion can leave the canvas WITHOUT the controller: "Delete RectBox"
+    is the ordinary way to get rid of one box, and it goes nowhere near
+    reject_all. The controller used to keep the dead Shape in its detection ->
+    Shape map, and the next threshold change handed it back to
+    canvas.delete_selected() -> list.remove(x) with x already gone: ValueError."""
+
+    def delete_by_hand(self, shape):
+        """Exactly what the Delete RectBox action does (MainWindow.actions.delete)."""
+        self.win.canvas.select_shape(shape)
+        self.win.delete_selected_shape()
+
+    def test_delete_a_suggestion_then_raise_the_threshold(self):
+        self.win.assist.set_threshold(0.0)
+        self.win.assist.auto_label_image()  # person 0.9, face 0.8
+        face = self.win.canvas.shapes[1]
+
+        self.delete_by_hand(face)
+
+        # Pushes `face` below the bar: the controller tries to remove a shape the
+        # canvas no longer has. This raised ValueError before the fix.
+        self.win.assist.set_threshold(0.85)
+
+        self.assertEqual(['person'], [s.label for s in self.win.canvas.shapes])
+        self.assertEqual(1, self.win.label_list.count())
+        self.assertEqual(1, len(self.win.shapes_to_items))
+
+    def test_a_hand_deleted_suggestion_is_not_resurrected(self):
+        self.win.assist.set_threshold(0.0)
+        self.win.assist.auto_label_image()
+        self.delete_by_hand(self.win.canvas.shapes[1])  # face (0.8)
+
+        # 0.7 still leaves face above the bar — but the user deleted it, so it
+        # must not come back from the detections the controller is still holding.
+        self.win.assist.set_threshold(0.7)
+
+        self.assertEqual(['person'], [s.label for s in self.win.canvas.shapes])
+        self.assertEqual(1, self.win.label_list.count())
+        self.assertEqual(1, self.backend.calls, 'the threshold re-ran the model')
+
+    def test_reject_all_after_a_hand_delete(self):
+        self.win.assist.auto_label_image()
+        self.delete_by_hand(self.win.canvas.shapes[1])
+
+        self.assertEqual(1, self.win.assist.reject_all())  # the dead one is not iterated
+
+        self.assertEqual([], self.win.canvas.shapes)
+        self.assertEqual(0, self.win.label_list.count())
+        self.assertEqual({}, self.win.shapes_to_items)
+
+    def test_accept_all_after_a_hand_delete(self):
+        self.win.assist.auto_label_image()
+        self.delete_by_hand(self.win.canvas.shapes[1])
+
+        self.assertEqual(1, self.win.assist.accept_all())
+
+        self.assertEqual(['person'], self.saved_labels())
+        # And the threshold no longer has anything to filter — least of all a
+        # shape that is gone.
+        self.win.assist.set_threshold(1.0)
+        self.assertEqual(1, len(self.win.canvas.shapes))
+
+    def test_deleting_the_last_suggestion_disables_the_bulk_actions(self):
+        self.win.assist.auto_label_image()
+        self.assertTrue(self.win.assist.action_reject.isEnabled())
+
+        for shape in list(self.win.canvas.shapes):
+            self.delete_by_hand(shape)
+
+        self.assertFalse(self.win.assist.action_accept.isEnabled())
+        self.assertFalse(self.win.assist.action_reject.isEnabled())
+
+
+class TestDuplicatedSuggestion(AssistTestCase):
+    """Ctrl+D on a suggestion: Shape.copy() faithfully clones `provisional`, so
+    the duplicate is a suggestion too — but it has no detection behind it. It was
+    tracked nowhere, which made it unreachable for Accept All / Reject All: a
+    dashed box that could not be saved and could not be resolved."""
+
+    def duplicate(self, shape):
+        self.win.canvas.select_shape(shape)
+        self.win.copy_selected_shape()  # Ctrl+D
+        return self.win.canvas.shapes[-1]
+
+    def test_the_duplicate_is_a_tracked_suggestion(self):
+        self.win.assist.auto_label_image()
+        clone = self.duplicate(self.win.canvas.shapes[0])
+
+        self.assertTrue(clone.provisional)
+        self.assertIn(clone, self.win.assist.provisional_shapes())
+        self.assertEqual([], self.saved_labels(), 'a suggestion is not data yet')
+
+    def test_reject_all_removes_a_duplicated_suggestion(self):
+        self.win.assist.auto_label_image()
+        self.duplicate(self.win.canvas.shapes[0])
+        self.assertEqual(3, len(self.win.canvas.shapes))
+
+        self.assertEqual(3, self.win.assist.reject_all())  # was 2: the clone was orphaned
+
+        self.assertEqual([], self.win.canvas.shapes, 'the duplicate outlived Reject All')
+        self.assertEqual(0, self.win.label_list.count())
+        self.assertEqual({}, self.win.shapes_to_items)
+
+    def test_accept_all_commits_a_duplicated_suggestion(self):
+        self.win.assist.auto_label_image()
+        self.duplicate(self.win.canvas.shapes[0])
+
+        self.assertEqual(3, self.win.assist.accept_all())
+
+        self.assertTrue(all(not s.provisional for s in self.win.canvas.shapes))
+        self.assertEqual(['person', 'face', 'person'], self.saved_labels())
+
+
+class TestImportCocoOntoALabeledImage(AssistTestCase):
+    """File > Import COCO... loads annotations without going through load_file(),
+    so nothing reset the label state first: load_labels appended its items while
+    canvas.load_shapes replaced the canvas wholesale. The list then held items
+    whose shapes were not on the canvas — selecting or deleting one is
+    canvas.delete_selected() -> list.remove(x) -> ValueError, and a save silently
+    dropped them."""
+
+    def write_dataset(self, label='cat', box=(10, 10, 20, 20)):
+        from libs.coco_io import COCOWriter
+        dataset = os.path.join(self.dir, 'annotations.json')
+        writer = COCOWriter('photos', 'a.png', (IMAGE_SIZE, IMAGE_SIZE, 3),
+                            local_img_path=self.path('a.png'))
+        writer.add_bnd_box(box[0], box[1], box[2], box[3], label, 0)
+        writer.save(class_list=[label], target_file=dataset)
+        return dataset
+
+    def import_coco(self, dataset):
+        fake_dialog = mock.Mock()
+        fake_dialog.getOpenFileName.return_value = (dataset, '')
+        with mock.patch('labelImg.QFileDialog', fake_dialog):
+            self.win.import_coco_dialog()
+
+    def test_import_replaces_the_label_state_instead_of_appending(self):
+        dataset = self.write_dataset()
+        self.add_real_box('dog')  # the image already has a label
+
+        self.import_coco(dataset)
+
+        self.assertEqual(['cat'], [s.label for s in self.win.canvas.shapes])
+        self.assertEqual(1, self.win.label_list.count())
+        self.assertEqual('cat', self.win.label_list.item(0).text())
+        self.assertEqual(1, len(self.win.shapes_to_items))
+        self.assertEqual(1, len(self.win.items_to_shapes))
+        # the two maps agree, and every item's shape is really on the canvas
+        for shape, item in self.win.shapes_to_items.items():
+            self.assertIs(shape, self.win.items_to_shapes[item])
+            self.assertIn(shape, self.win.canvas.shapes)
+
+    def test_deleting_an_item_after_an_import_does_not_crash(self):
+        dataset = self.write_dataset()
+        self.add_real_box('dog')
+
+        self.import_coco(dataset)
+
+        # The crash repro: walk the label list and delete each item's shape.
+        for index in range(self.win.label_list.count()):
+            shape = self.win.items_to_shapes[self.win.label_list.item(index)]
+            self.win.canvas.select_shape(shape)
+            self.win.delete_selected_shape()  # ValueError on a stale item
+
+        self.assertEqual([], self.win.canvas.shapes)
+        self.assertEqual(0, self.win.label_list.count())
+
+    def test_import_over_live_suggestions_leaves_no_stale_tracking(self):
+        dataset = self.write_dataset()
+        self.win.assist.auto_label_image()  # suggestions on the canvas...
+
+        self.import_coco(dataset)  # ...and load_labels replaces the canvas
+
+        self.assertEqual(['cat'], [s.label for s in self.win.canvas.shapes])
+        # The controller must have let go of the shapes that canvas no longer has.
+        self.assertEqual([], self.win.assist.provisional_shapes())
+        self.win.assist.set_threshold(0.95)  # used to delete a shape that is gone
+        self.assertEqual(['cat'], [s.label for s in self.win.canvas.shapes])
+
+
 class TestImageCarrier(unittest.TestCase):
     """numpy is OPTIONAL: the base install has neither numpy nor onnxruntime, so
     the UI-thread conversion has to produce something a backend can read either

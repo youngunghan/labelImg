@@ -951,8 +951,31 @@ class MainWindow(QMainWindow, WindowMixin):
         del self.shapes_to_items[shape]
         del self.items_to_shapes[item]
         self.update_combo_box()
+        # EVERY removal is reported to the controller — including the ones it did
+        # not ask for (the ordinary "Delete RectBox" on a suggestion). Otherwise
+        # it keeps a reference to a shape that has left the canvas, and the next
+        # threshold change deletes it a second time (canvas.delete_selected ->
+        # list.remove -> ValueError). Guarded: this can run before __init__ has
+        # built the controller.
+        if getattr(self, 'assist', None) is not None:
+            self.assist.discard_shape(shape)
 
     def load_labels(self, shapes):
+        # REPLACE, never append: canvas.load_shapes() at the end of this method
+        # swaps canvas.shapes out wholesale, so the label list has to be swapped
+        # too. Appending onto whatever was already there leaves items whose shapes
+        # are no longer on the canvas — selecting or deleting one of those reaches
+        # canvas.delete_selected() -> list.remove(x) with x not in the list
+        # (ValueError), and a save silently omits them. load_file() resets first,
+        # but File > Import COCO... and copy_previous_bounding_boxes do not, which
+        # is what made this reachable.
+        self.items_to_shapes.clear()
+        self.shapes_to_items.clear()
+        self.label_list.clear()
+        if getattr(self, 'assist', None) is not None:
+            # The suggestions lived on the canvas we are about to replace.
+            self.assist.forget_suggestions()
+
         s = []
         for label, points, line_color, fill_color, difficult in shapes:
             shape = Shape(label=label)
@@ -1561,6 +1584,13 @@ class MainWindow(QMainWindow, WindowMixin):
             self.canvas.verified = self.label_file.verified
             self.paint_canvas()
             self.save_file()
+            if self.label_file_format == LabelFileFormat.COCO:
+                # COCO has no schema slot for verified (nor for difficult), so the
+                # writer drops it and the reader reports False. Say so: a flag that
+                # silently evaporates on the next load is worse than one the user
+                # knows is session-only.
+                self.status('Verified — note: COCO stores no verified/difficult '
+                            'flag, so it is not written to the dataset json.')
 
     def open_prev_image(self, _value=False):
         # Proceeding prev image without dialog if having any label
@@ -1814,12 +1844,19 @@ class MainWindow(QMainWindow, WindowMixin):
         # 라벨 이동이 하나라도 실패하면 이미 옮긴 이미지/라벨을 모두 되돌려(원자성)
         # 이미지만 옮겨지고 라벨이 원래 폴더에 남는 어긋남을 방지한다.
         image_dir = os.path.dirname(src_image)
+        # COCO의 데이터셋 json은 '이 이미지의 사이드카'가 아니라 여러 이미지가 공유하는
+        # 파일이다. stem이 우연히 일치하면(예: Export COCO로 0001.json 지정) 아래 루프가
+        # 데이터셋 전체를 _good/_bad 폴더로 옮겨 다른 이미지들의 박스까지 끌고 간다 — 제외.
+        coco_target = (self.coco_dataset_target()
+                       if self.label_file_format == LabelFileFormat.COCO else None)
         for ext in (XML_EXT, TXT_EXT, JSON_EXT):
             # default_save_dir 우선, 없으면 이미지 옆에서도 찾는다 — 하위 폴더까지
             # 재귀 스캔된 이미지는 라벨이 이미지 옆에만 있을 수 있다.
             label_src = next((p for p in (os.path.join(label_dir, stem + ext),
                                           os.path.join(image_dir, stem + ext))
                               if os.path.isfile(p)), None)
+            if label_src and coco_target and self.is_same_path(label_src, coco_target):
+                label_src = None
             if label_src:
                 dest_label = os.path.join(dest_dir, new_stem + ext)
                 try:
@@ -1847,10 +1884,16 @@ class MainWindow(QMainWindow, WindowMixin):
                     return
 
         self.classify_history.append(moves)
-        if len(moves) > 1:
-            self.status('Moved to %s  (Ctrl+Z to undo)' % dest_dir)
+        if coco_target:
+            # 데이터셋 레벨 포맷이라 옮길 사이드카가 없다. 데이터셋 json에는 이제 존재하지
+            # 않는 경로를 가리키는 images[]/annotations[] 항목이 남는다 — 침묵보다 공지.
+            note = ('Moved to %s — COCO dataset entry left in place; '
+                    'boxes were not moved (Ctrl+Z to undo)' % dest_dir)
+        elif len(moves) > 1:
+            note = 'Moved to %s  (Ctrl+Z to undo)' % dest_dir
         else:
-            self.status('Moved to %s — no label file found to move (Ctrl+Z to undo)' % dest_dir)
+            note = 'Moved to %s — no label file found to move (Ctrl+Z to undo)' % dest_dir
+        self.status(note)
 
         # 목록 새로고침 + 다음 이미지 (delete_image 패턴)
         self.import_dir_images(self.last_open_dir)
@@ -1859,6 +1902,9 @@ class MainWindow(QMainWindow, WindowMixin):
             self.load_file(self.m_img_list[self.cur_img_idx])
         else:
             self.close_file()
+        # load_file()이 "Loaded ..."로 위 메시지를 덮어쓴다 — 마지막에 다시 알린다.
+        # (COCO 공지는 사용자가 반드시 봐야 하는 정보다.)
+        self.status(note)
 
     def undo_classify(self, _value=False):
         """가장 최근 good/bad 분류 이동을 취소하고 파일들을 원위치로 되돌린다."""

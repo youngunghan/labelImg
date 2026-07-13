@@ -9,7 +9,12 @@ import os
 
 here = os.path.abspath(os.path.dirname(__file__))
 NAME = 'labelImg'
-REQUIRES_PYTHON = '>=3.0.0'
+# 3.7+, not 3.0+: labelImg.py imports libs.inference / libs.assist at module top,
+# and those use `from __future__ import annotations` (3.7+) and dataclasses (3.7+).
+# On 3.3-3.6 the app would not merely lose the AI feature, it would fail to import
+# at all (SyntaxError / ImportError), so the declared support matrix has to move
+# with the code. Keep this in step with the classifiers below.
+REQUIRES_PYTHON = '>=3.7'
 REQUIRED_DEP = ['pyqt5', 'lxml']
 about = {}
 
@@ -109,11 +114,13 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
+        # 3.3-3.6 dropped: see REQUIRES_PYTHON above.
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
     package_data={'data/predefined_classes.txt': ['data/predefined_classes.txt']},
     options={'py2app': OPTIONS},
