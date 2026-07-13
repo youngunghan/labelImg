@@ -42,7 +42,7 @@ python label_to_csv.py -p test -l /User/test/labels -m txt
 
 ## 주의사항(코드 특성)
 
-- **출력 파일명은 `-o`를 무시하고 항상 `res.csv`로 하드코딩**돼 있다(`tools/label_to_csv.py:215`).
+- **출력 파일명은 `-o`를 무시하고 항상 `res.csv`로 하드코딩**돼 있다(`tools/label_to_csv.py:216`).
 - `txt` 모드는 **이미 정규화된 YOLO 좌표**를 가정한다(절대 픽셀 txt를 넣으면 `[0,1]` 클램프로 뭉개진다).
 - 이미지 확장자가 `.jpg`가 아니면(png 등) URI가 어긋난다.
 - 빈 라벨 파일이 있으면 `pandas.read_csv`가 예외를 낼 수 있다(예외 처리 없음).

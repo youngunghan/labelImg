@@ -21,7 +21,7 @@
 포맷별:
 - **PASCAL VOC**: `<difficult>1</difficult>`로 보존.
 - **YOLO**: **저장되지 않는다**(읽으면 항상 False).
-- **CreateML**: **저장 시 difficult가 기록되지 않으며**, 읽을 때는 모든 박스가 True로 들어온다(코드 특성, `create_ml_io.py:132`).
+- **CreateML**: **저장 시 difficult가 기록되지 않으며**, 읽을 때는 모든 박스가 True로 들어온다(코드 특성, `create_ml_io.py:133`).
 
 ## Single Class Mode 와 "use default label" — 서로 다른 두 기능
 

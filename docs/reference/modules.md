@@ -69,7 +69,7 @@
 | 파일 | 클래스 | 위치 |
 |---|---|---|
 | `libs/pascal_voc_io.py` (171줄) | `PascalVocWriter` / `PascalVocReader` | `:15` / `:127` |
-| `libs/yolo_io.py` (171줄) | `YoloParseError` / `YOLOWriter` / `YoloReader` | `:12` / `:16` / `:86` |
+| `libs/yolo_io.py` (173줄) | `YoloParseError` / `YOLOWriter` / `YoloReader` | `:12` / `:16` / `:86` |
 | `libs/create_ml_io.py` (136줄) | `CreateMLWriter` / `CreateMLReader` | `:13` / `:96` |
 
 상세 포맷 → [formats.md](formats.md).
@@ -101,7 +101,7 @@
 
 | 파일 | 내용 |
 |---|---|
-| `tools/label_to_csv.py` (215줄) | `txt2csv`(`:18`)/`xml2csv`(`:70`)/CLI(`:132`) — VOC/YOLO → AutoML CSV. → [../how-to/export-to-csv.md](../how-to/export-to-csv.md) |
+| `tools/label_to_csv.py` (216줄) | `txt2csv`(`:18`)/`xml2csv`(`:70`)/CLI(`:132`) — VOC/YOLO → AutoML CSV. → [../how-to/export-to-csv.md](../how-to/export-to-csv.md) |
 | `Makefile` | `qt5py3`(pyrcc5 컴파일)·`testpy3`(unittest)·`clean`·`pip_upload` |
 | `setup.py` | PyPI 패키징. deps `pyqt5`,`lxml`, 진입점 `labelImg.labelImg:main` |
 | `resources.qrc` | 아이콘 + `strings*.properties`(en/zh-TW/zh-CN/ja-JP) 매니페스트 |

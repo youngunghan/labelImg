@@ -78,12 +78,12 @@ dog
 
 - 한 줄당 클래스명, **줄 번호(0부터) = `class_index`**.
 - 저장 시 처음 보는 라벨은 `class_list`에 append되어 인덱스를 부여받는다(`yolo_io.py:47-50`).
-- 읽기 시 `classes.txt`를 `strip('\n').split('\n')`로 로드해 `self.classes[int(class_index)]`로 라벨 조회(`yolo_io.py:109,133`).
+- 읽기 시 `classes.txt`를 `strip('\n').split('\n')`로 로드해 `self.classes[int(class_index)]`로 라벨 조회(`yolo_io.py:111,135`).
 
 주의:
-- **difficult는 저장되지 않으며 읽을 때 항상 `False`** (`yolo_io.py:170-171`).
-- (2026-07-08 통일) 라벨 txt와 `classes.txt` 모두 저장(`yolo_io.py:60-68`)·읽기(`yolo_io.py:108`, `yolo_io.py:148`)가 `DEFAULT_ENCODING`(utf-8)으로 고정됐다 — 비ASCII 클래스명이 플랫폼과 무관하게 라운드트립된다. (이전에는 `classes.txt`와 읽기 경로가 OS 로케일을 따라 한국어 Windows(cp949)에서 mojibake/크래시 위험이 있었다.)
-- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:147-168`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:2012-2021`).
+- **difficult는 저장되지 않으며 읽을 때 항상 `False`** (`yolo_io.py:172-173`).
+- (2026-07-08 통일) 저장(`yolo_io.py:60-68`)은 라벨 txt와 `classes.txt` 모두 `DEFAULT_ENCODING`(utf-8)으로 고정됐다 — 비ASCII 클래스명이 플랫폼과 무관하게 라운드트립된다. (이전에는 `classes.txt`와 읽기 경로가 OS 로케일을 따라 한국어 Windows(cp949)에서 mojibake/크래시 위험이 있었다.) 읽기는 둘로 나뉜다: 라벨 txt는 `ENCODE_METHOD`(=`DEFAULT_ENCODING`)으로 읽고(`yolo_io.py:150`), `classes.txt`는 하드코딩된 `utf-8-sig`로 읽어(`yolo_io.py:110`) 첫 클래스명 앞의 Windows/Notepad BOM을 제거한다.
+- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:149-173`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:2012-2021`).
 
 ---
 

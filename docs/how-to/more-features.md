@@ -12,7 +12,7 @@
 - `b` (Classify Bad) → `<연 폴더>_bad/` 으로 이동
 - `Ctrl+Z` (Undo Classify) → 가장 최근 이동을 원위치로 되돌림(`undo_classify`, `labelImg.py:1726`)
 
-분류 동작들은 File 메뉴(카테고리별 `Classify <이름> (<키> → _<이름>)` / Undo Classify / Edit Classify Categories, `labelImg.py:467-469`)에도 있으며, `g`/`b`는 이미지가 로드되기 전에는 비활성이다(`onLoadActive`, `labelImg.py:437-438`).
+분류 동작들은 File 메뉴(카테고리별 `Classify <이름> (<키> → _<이름>)` / Undo Classify / Edit Classify Categories, `labelImg.py:466-467`)에도 있으며, `g`/`b`는 이미지가 로드되기 전에는 비활성이다(`onLoadActive`, `labelImg.py:435-436`).
 
 동작 상세:
 - **`Open Dir`로 폴더를 먼저 열어야** 한다(아니면 상태바에 안내만 뜨고 아무 일도 안 함).
@@ -41,11 +41,11 @@ g/good·b/bad는 **기본값**일 뿐이다. **File > Edit Classify Categories**
 
 ## 이전 이미지의 박스 복사 (`Ctrl+V`)
 
-`Copy Previous Bounding Boxes`(`copy_previous_bounding_boxes`, `labelImg.py:2042`)는 **바로 이전 이미지의 어노테이션을 현재 이미지에 그대로 올리고 즉시 저장**한다. 연속 프레임/영상 캡처처럼 객체 위치가 거의 같은 이미지를 빠르게 라벨링할 때 유용하다. **File 메뉴**에 등록돼 있다(`labelImg.py:466`). **`Open Dir`로 연 이미지 목록 안에서만 동작**한다(목록의 이전 이미지를 참조하므로) — `Open File`로 단독으로 연 파일에서는 조용히 무시된다(현재 파일이 `m_img_list`에 없으면 그대로 반환하는 가드, `labelImg.py:2044-2045`).
+`Copy Previous Bounding Boxes`(`copy_previous_bounding_boxes`, `labelImg.py:2042`)는 **바로 이전 이미지의 어노테이션을 현재 이미지에 그대로 올리고 즉시 저장**한다. 연속 프레임/영상 캡처처럼 객체 위치가 거의 같은 이미지를 빠르게 라벨링할 때 유용하다. **File 메뉴**에 등록돼 있다(`labelImg.py:465`). **`Open Dir`로 연 이미지 목록 안에서만 동작**한다(목록의 이전 이미지를 참조하므로) — `Open File`로 단독으로 연 파일에서는 조용히 무시된다(현재 파일이 `m_img_list`에 없으면 그대로 반환하는 가드, `labelImg.py:2044-2045`).
 
 ## 사전 정의 클래스 앱에서 편집 (`Ctrl+Shift+E`)
 
-`File → Edit Default Classes`(`Ctrl+Shift+E`, `edit_default_classes`, `labelImg.py:1959`)는 여러 줄 입력창을 띄워 클래스 목록을 받고 **`predefined_classes.txt`를 영구적으로 덮어쓴다**. 저장 후 라벨 히스토리·`w` 라벨 입력창·use-default-label 콤보박스를 즉시 갱신한다. 파일을 직접 편집하지 않고 앱 안에서 클래스를 관리할 수 있다. (메뉴 위치는 File, `labelImg.py:466`.)
+`File → Edit Default Classes`(`Ctrl+Shift+E`, `edit_default_classes`, `labelImg.py:1959`)는 여러 줄 입력창을 띄워 클래스 목록을 받고 **`predefined_classes.txt`를 영구적으로 덮어쓴다**. 저장 후 라벨 히스토리·`w` 라벨 입력창·use-default-label 콤보박스를 즉시 갱신한다. 파일을 직접 편집하지 않고 앱 안에서 클래스를 관리할 수 있다. (메뉴 위치는 File, `labelImg.py:467`.)
 
 > **frozen(exe)에서의 클래스 파일**: 빌드된 실행파일에서는 항상 **실행파일 옆의 쓰기 가능한 `predefined_classes.txt`** 를 우선 사용한다(`get_persistent_classes_file`, `labelImg.py:1939-1957`). 이 영속 파일이 한 번 생기면 **CLI 두 번째 인자 `[PRE-DEFINED CLASS FILE]` 는 이후 무시**되고(최초 1회 시드로만 쓰임), 클래스 변경은 Edit Default Classes 또는 그 파일 직접 편집으로 한다. 소스(비 frozen)로 실행할 때는 CLI 인자가 그대로 적용된다.
 
@@ -63,7 +63,7 @@ g/good·b/bad는 **기본값**일 뿐이다. **File > Edit Classify Categories**
 
 ## 보기/탐색
 
-- **Fit Window** `Ctrl+F` · **Fit Width** `Ctrl+Shift+F` · **원본 크기(100%)** `Ctrl+=` (`labelImg.py:349-356`).
+- **Fit Window** `Ctrl+F` · **Fit Width** `Ctrl+Shift+F` · **원본 크기(100%)** `Ctrl+=` (`labelImg.py:347-354`).
 - **모든 박스 숨기기/보이기** `Ctrl+H` / `Ctrl+A` (`toggle_polygons`).
 - **최근 파일** `File → Open Recent` — 최근 연 파일 최대 7개(세션 간 영속, `SETTING_RECENT_FILES`).
 

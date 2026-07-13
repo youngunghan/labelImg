@@ -54,4 +54,4 @@
 - [`libs/labelFile.py`](../libs/labelFile.py) — `LabelFile`(포맷별 writer 위임 파사드) + `LabelFileFormat`.
 - [`libs/pascal_voc_io.py`](../libs/pascal_voc_io.py) · [`libs/yolo_io.py`](../libs/yolo_io.py) · [`libs/create_ml_io.py`](../libs/create_ml_io.py) — 포맷별 Reader/Writer.
 - [`libs/settings.py`](../libs/settings.py) · [`libs/stringBundle.py`](../libs/stringBundle.py) · [`libs/utils.py`](../libs/utils.py) — 설정 영속화·i18n·공용 헬퍼.
-- [`tools/label_to_csv.py`](../tools/label_to_csv.py) — VOC/YOLO 라벨을 AutoML CSV로 변환하는 독립 스크립트. `tests/` — 단위 테스트 5파일.
+- [`tools/label_to_csv.py`](../tools/label_to_csv.py) — VOC/YOLO 라벨을 AutoML CSV로 변환하는 독립 스크립트. `tests/` — 단위 테스트 8파일.

@@ -78,7 +78,7 @@ pyinstaller --hidden-import=pyqt5 --hidden-import=lxml -F -n "labelImg" -c label
 python -m unittest discover tests      # 또는 make testpy3
 ```
 
-테스트 범위: `test_io`(VOC/CreateML 라운드트립)·`test_settings`(설정 영속화)·`test_stringBundle`(i18n 폴백)·`test_utils`(색상/정렬)·`test_qt`(앱 부팅)·`test_classify`(포크 분류의 원자적 이동·실패 주입 롤백·undo — 실제 `MainWindow` 구동)·`test_yolo_reader`(YOLO 견고성: classes.txt 부재·불량 라인). 총 18개.
+테스트 범위: `test_io`(VOC/CreateML 라운드트립)·`test_settings`(설정 영속화)·`test_stringBundle`(i18n 폴백)·`test_utils`(색상/정렬)·`test_qt`(앱 부팅)·`test_classify`(포크 분류의 원자적 이동·실패 주입 롤백·undo — 실제 `MainWindow` 구동)·`test_yolo_reader`(YOLO 견고성: classes.txt 부재·불량 라인)·`test_create_ml_reader`(CreateML 리더: verified 매칭·utf-8). 총 30개(8개 파일).
 
 > ℹ️ `test_stringBundle`은 로케일 환경변수를 `os.environ.get()`으로 안전 조회하도록 고쳐져, `LC_ALL`/`LANG`이 없는 Windows PowerShell/cmd에서도 그대로 통과한다(`tests/test_stringBundle.py`). 별도 환경변수 설정이 필요 없다.
 > `test_io`가 실행 중 `tests/tests.json`(`tests/test_io.py:49`)과 `tests/test.xml`(`tests/test_io.py:19`)을 만든다. 두 산출물 모두 `tests/.gitignore`에 등록돼 작업트리를 더럽히지 않는다.

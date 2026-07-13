@@ -7,8 +7,8 @@
 | 키 | 동작 |
 |---|---|
 | `Ctrl+O` | 파일 열기(Open) |
-| `Ctrl+u` | 디렉터리 열기(Open Dir) — 모든 이미지 로드 |
-| `Ctrl+r` | 기본 어노테이션 저장 디렉터리 변경 |
+| `Ctrl+U` | 디렉터리 열기(Open Dir) — 모든 이미지 로드 |
+| `Ctrl+R` | 기본 어노테이션 저장 디렉터리 변경 |
 | `Ctrl+Shift+O` | 어노테이션 파일 열기 |
 | `Ctrl+S` | 저장 |
 | `Ctrl+Shift+S` | 다른 이름으로 저장(Save As) |
