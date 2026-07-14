@@ -11,6 +11,8 @@ pip3 install labelImg
 labelImg
 ```
 
+> ⚠️ 이 명령으로 설치되는 PyPI 패키지는 업스트림 `labelImg`이며, **이 포크의 기능(AI 자동 라벨링, COCO 가져오기/내보내기 등)을 전혀 포함하지 않습니다.** 추가로 업스트림 1.8.6은 최신 PyQt5에서 박스 그리기나 줌 시 충돌하는 알려진 결함이 있습니다(이슈 #987/#988/#938). **이 저장소에서 소스로 실행**하는 것을 권합니다:
+
 소스에서 실행하려면(이 저장소) → [../how-to/install-and-build.md](../how-to/install-and-build.md). Windows에서 소스 실행 시 먼저 리소스를 컴파일해야 한다:
 
 ```shell
