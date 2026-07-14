@@ -28,8 +28,8 @@ class MissingDependency(Exception):
 
     Backends raise this from their constructor (or from a lazy import inside
     it) instead of letting ``ImportError`` escape, so the registry can tell
-    "this model needs ``pip install labelImg[ai]``" apart from a genuine bug and
-    degrade to "AI actions disabled" rather than taking the whole app down.
+    "this model needs its optional extras installed" apart from a genuine bug
+    and degrade to "AI actions disabled" rather than taking the whole app down.
     """
 
 

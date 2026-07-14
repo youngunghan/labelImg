@@ -1,3 +1,4 @@
+import inspect
 import os
 import pickle
 import sys
@@ -19,8 +20,12 @@ from PyQt5.QtCore import QPointF
 from PyQt5.QtGui import QImage
 
 from labelImg import get_main_app
+from libs.assist import controller as assist_controller
 from libs.assist.suggestion import detection_to_shape
 from libs.constants import SETTING_MODEL_BACKEND
+from libs.inference import backend as inference_backend
+from libs.inference import registry as inference_registry
+from libs.inference import yolo_onnx as inference_yolo_onnx
 from libs.inference.service import RawImage, SynchronousExecutor, to_model_image
 from libs.inference.stub import StubBackend, image_size
 from libs.inference.types import Detection
@@ -380,7 +385,7 @@ class TestNoBackend(AssistTestCase):
         for action in self.win.assist_actions:
             self.assertFalse(action.isEnabled(), action.text())
             tooltip = action.toolTip()
-            self.assertIn('labelImg[ai]', tooltip)
+            self.assertIn('pip install -e ".[ai]"', tooltip)
             self.assertIn('No model backend configured', tooltip)
 
     def test_auto_label_without_a_backend_does_not_crash(self):
@@ -442,11 +447,42 @@ class TestBackendConfiguredButUnavailable(AssistTestCase):
         for action in self.win.assist_actions:
             self.assertFalse(action.isEnabled(), action.text())
             tooltip = action.toolTip()
-            self.assertIn('labelImg[ai]', tooltip)
+            self.assertIn('pip install -e ".[ai]"', tooltip)
             self.assertIn('yolo_onnx', tooltip, 'hint must name the backend that failed')
             self.assertNotIn('No model backend configured', tooltip,
                              'a configured-but-broken backend is not the same as '
                              'nothing being configured')
+
+
+class TestNoStaleUpstreamPyPIInstruction(unittest.TestCase):
+    """Regression guard: this fork is not published to PyPI, so a bare
+    `pip install labelImg[ai]` silently fetches the unrelated upstream
+    HumanSignal package (which has none of this fork's AI code) instead of
+    installing this fork's extras. Every user-facing runtime string in the AI
+    seam (the disabled-action tooltips, the registry's log line, and the
+    backend's MissingDependency messages) must instead point at installing
+    from this checkout -- never at the bare package name."""
+
+    BAD_INSTRUCTION = 'pip install labelImg[ai]'
+
+    def test_hint_constants_do_not_name_the_wrong_package(self):
+        self.assertNotIn(self.BAD_INSTRUCTION,
+                         assist_controller.NO_BACKEND_CONFIGURED_HINT)
+        self.assertNotIn(self.BAD_INSTRUCTION,
+                         assist_controller.BACKEND_UNAVAILABLE_HINT)
+
+    def test_no_source_in_the_ai_seam_names_the_wrong_package(self):
+        # Belt-and-suspenders over the constants check above: scan the full
+        # source (including log lines, exception messages, and docstrings) of
+        # every module in the "AI disabled" reporting path, so a new call site
+        # cannot reintroduce the bare PyPI form even outside the two hints.
+        modules = (assist_controller, inference_registry, inference_backend,
+                   inference_yolo_onnx)
+        for module in modules:
+            source = inspect.getsource(module)
+            self.assertNotIn(self.BAD_INSTRUCTION, source,
+                             '%s still tells the user to run %r' %
+                             (module.__name__, self.BAD_INSTRUCTION))
 
 
 class TestToolTipRestoredWhenBackendBecomesAvailable(AssistTestCase):

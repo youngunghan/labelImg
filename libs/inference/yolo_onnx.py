@@ -15,8 +15,8 @@ the constructor / methods, never at module scope, so ``import
 libs.inference.yolo_onnx`` -- and therefore ``libs.inference`` and the registry
 table that names it -- still costs nothing on a base install.  When either dep
 is absent the constructor raises ``MissingDependency``, ``build_backend``
-returns None, and the user gets "pip install labelImg[ai]" instead of a dead
-editor.
+returns None, and the user gets a hint to install the optional extras from
+this checkout instead of a dead editor.
 
 **The geometry is pure Python.**  ``letterbox_params`` / ``inverse_letterbox``
 / ``nms`` / ``decode_output`` / ``postprocess`` use no numpy at all: getting the
@@ -598,8 +598,9 @@ def _require(module_name: str) -> Any:
         return __import__(module_name)
     except ImportError as exc:
         raise MissingDependency(
-            "the 'yolo_onnx' backend needs %s, which is not installed "
-            "(pip install labelImg[ai])" % module_name) from exc
+            "the 'yolo_onnx' backend needs %s, which is not installed. Install "
+            "from your checkout with pip install -e \".[ai]\" (this fork isn't "
+            "on PyPI)" % module_name) from exc
 
 
 class YoloOnnxBackend(ModelBackend):
@@ -877,7 +878,8 @@ class YoloOnnxBackend(ModelBackend):
         if not isinstance(image, np.ndarray) and isinstance(data, (bytes, bytearray)):
             raise MissingDependency(
                 "the 'yolo_onnx' backend received a numpy-free RawImage; it needs "
-                'numpy and onnxruntime (pip install labelImg[ai])')
+                "numpy and onnxruntime. Install from your checkout with pip "
+                "install -e \".[ai]\" (this fork isn't on PyPI)")
 
         array = np.asarray(image)
         if array.ndim != 3 or array.shape[2] != 3:

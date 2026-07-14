@@ -12,10 +12,12 @@ build one from plain config.  Two rules shape it:
 
 2. **A missing optional dependency is not an error.**  ``build_backend`` returns
    ``None`` when the requested backend cannot be constructed, and the caller
-   disables the AI actions and points the user at ``pip install labelImg[ai]``.
-   labelImg must keep working as a plain annotation tool on a machine with no
-   onnxruntime -- an ImportError escaping from here would take the app down at
-   startup for users who never asked for AI.
+   disables the AI actions and points the user at installing the optional
+   extras from this checkout (see the hints in ``libs/assist/controller.py``)
+   rather than a PyPI install of this package. labelImg must keep working as a
+   plain annotation tool on a machine with no onnxruntime -- an ImportError
+   escaping from here would take the app down at startup for users who never
+   asked for AI.
 """
 
 from __future__ import annotations
@@ -162,8 +164,9 @@ def build_backend(config: Optional[Mapping[str, Any]] = None) -> Optional[ModelB
         return factory(config)
     except MissingDependency as exc:
         # Expected on a machine without the AI extras -- info, not a traceback.
-        logger.info('Inference backend %r unavailable: %s '
-                    "(install the optional extras, e.g. 'pip install labelImg[ai]')",
+        logger.info("Inference backend %r unavailable: %s "
+                    "(install from your checkout: pip install -e \".[ai]\" -- "
+                    "this fork isn't on PyPI)",
                     name, exc)
         return None
     except ImportError as exc:

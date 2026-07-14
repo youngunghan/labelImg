@@ -11,7 +11,7 @@
 | Core app (`labelImg.py`) | +693 / −28 |
 | New documentation | `docs/` tree: 21 files, ~2,038 lines (Diátaxis: tutorials / how-to / reference / explanation) |
 | Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
-| Tests | **223/223 passing**, 12 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
+| Tests | **229/229 passing**, 13 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
 | Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
 | CI | GitHub Actions: 3 jobs — core test matrix (Linux/Windows × Py3.9/3.12, headless Qt, base install only), `test-ai` (base + `[ai]` extra, exercises the ONNX-dependent tests), ruff critical-rules lint |
 

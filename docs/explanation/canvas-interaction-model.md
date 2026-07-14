@@ -18,14 +18,14 @@ CREATE, EDIT = list(range(2))   # canvas.py:33
 
 1. **버튼 누름**(`mousePressEvent` → `handle_drawing` 1차, `canvas.py:261-263`, `334-340`): `current = Shape()`를 만들고 시작점을 `add_point`, 미리보기선 `line`을 `[pos, pos]`로 초기화, `drawingPolygon.emit(True)`.
 2. **드래그**(`mouseMoveEvent`, `canvas.py:111-165`): `line[1]`을 현재 위치로 갱신해 고무줄 사각형을 그린다. 픽셀맵 밖이면 좌표를 `[0,max]`로 클리핑한다. (시작점 흡인 `close_enough` 분기는 `len(current) > 1`을 요구하는데 드래그 중 `current`는 시작점 1개뿐이라 이 플로우에선 도달하지 않는다 — 과거 다각형 도구의 흔적.)
-3. **버튼 놓음**(`mouseReleaseEvent` → `handle_drawing` 2차, `canvas.py:292-295`, `322-333`): 시작점과 놓은 지점(`line[1]`)을 대각으로 보고 `(max_x,min_y)`,`(target)`,`(min_x,max_y)` 세 점을 추가해 4점을 채운 뒤 `finalise`. **제자리 클릭**(이동 없이 누르고 놓기)은 4점이 모두 같아져 `finalise`의 영-크기 가드(`canvas.py:576-580`)에 걸려 버려지고 `drawingPolygon(False)`가 emit되며, beginner 모드(기본)에선 `toggle_drawing_sensitive`(`labelImg.py:746-754`)가 CREATE 모드 자체를 취소하고 EDIT로 되돌린다.
+3. **버튼 놓음**(`mouseReleaseEvent` → `handle_drawing` 2차, `canvas.py:292-295`, `322-333`): 시작점과 놓은 지점(`line[1]`)을 대각으로 보고 `(max_x,min_y)`,`(target)`,`(min_x,max_y)` 세 점을 추가해 4점을 채운 뒤 `finalise`. **제자리 클릭**(이동 없이 누르고 놓기)은 4점이 모두 같아져 `finalise`의 영-크기 가드(`canvas.py:576-580`)에 걸려 버려지고 `drawingPolygon(False)`가 emit되며, beginner 모드(기본)에선 `toggle_drawing_sensitive`(`labelImg.py:826-834`)가 CREATE 모드 자체를 취소하고 EDIT로 되돌린다.
 4. **finalise**(`canvas.py:574-587`): 첫 점==끝 점이면(영-크기 박스) 버리고, 아니면 `current.close()` 후 `shapes`에 추가하고 `newShape.emit()`. → MainWindow가 `LabelDialog`를 띄워 라벨을 받는다. 라벨 입력을 취소하면 MainWindow가 `reset_all_lines`(`canvas.py:698-706`)를 호출해 방금 추가된 박스를 `shapes`에서 pop하고 `drawingPolygon(False)`를 emit해 그리기를 없던 일로 되돌린다.
 
 `Esc`는 그리던 박스를 취소(`current=None`, `drawingPolygon.emit(False)`)하고, `Return`은 닫을 수 있으면 `finalise`한다(`canvas.py:629-645`).
 
 ### 정사각형 그리기(draw_square)
 
-`Ctrl` 키를 누르고 있으면(MainWindow의 `keyPressEvent`/`keyReleaseEvent`가 `set_drawing_shape_to_square` 토글, `labelImg.py:579-586`) 그리기 중 `line[1]`이 시작점 기준 정사각형 좌표로 강제된다(`canvas.py:148-155`).
+`Ctrl` 키를 누르고 있으면(MainWindow의 `keyPressEvent`/`keyReleaseEvent`가 `set_drawing_shape_to_square` 토글, `labelImg.py:616-623`) 그리기 중 `line[1]`이 시작점 기준 정사각형 좌표로 강제된다(`canvas.py:148-155`).
 
 ## EDIT 모드 — 선택·이동·정점편집
 
@@ -59,7 +59,7 @@ CREATE, EDIT = list(range(2))   # canvas.py:33
 - `Ctrl + 휠` → `zoomRequest`(줌)
 - 그 외 → `scrollRequest`(스크롤/패닝)
 
-실제 줌 배율과 밝기는 MainWindow의 `ZoomWidget`/`LightWidget` 값으로 결정되고, `paint_canvas`(`labelImg.py:1256`)가 `canvas.scale = 0.01*zoom_widget.value()`, `canvas.overlay_color = light_widget.color()`를 세팅한다. → [../reference/shortcuts.md](../reference/shortcuts.md) · [architecture.md](architecture.md)
+실제 줌 배율과 밝기는 MainWindow의 `ZoomWidget`/`LightWidget` 값으로 결정되고, `paint_canvas`(`labelImg.py:1388`)가 `canvas.scale = 0.01*zoom_widget.value()`, `canvas.overlay_color = light_widget.color()`를 세팅한다. → [../reference/shortcuts.md](../reference/shortcuts.md) · [architecture.md](architecture.md)
 
 ## 커서
 

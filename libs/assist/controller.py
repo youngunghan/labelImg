@@ -63,17 +63,21 @@ SHORTCUT_REJECT_ALL = 'Ctrl+Backspace'
 # install, SETTING_MODEL_BACKEND unset -- DEFAULT_BACKEND is None precisely so
 # this is the out-of-the-box state), versus a backend WAS named but its
 # construction failed (missing extras, or extras present but SETTING_MODEL_PATH
-# missing/invalid). Telling a fresh-install user to just `pip install
-# labelImg[ai]` would be accurate but incomplete -- the extras alone do nothing
-# without also choosing a backend and a model path -- so that case gets its own
-# message rather than reusing the "something failed" one.
+# missing/invalid). Telling a fresh-install user to just install the extras
+# would be accurate but incomplete -- they alone do nothing without also
+# choosing a backend and a model path -- so that case gets its own message
+# rather than reusing the "something failed" one. Both hints point at
+# `pip install -e ".[ai]"` from this checkout: this fork is not published to
+# PyPI, so the plain package-name form would silently fetch an unrelated
+# upstream project instead.
 NO_BACKEND_CONFIGURED_HINT = (
     "No model backend configured — set a backend (e.g. 'yolo_onnx') and a model "
-    "path in Settings; installing the extras alone is not enough: "
-    "pip install labelImg[ai]")
+    "path in Settings; installing the extras alone is not enough. This fork "
+    "isn't on PyPI: install from your checkout with pip install -e \".[ai]\"")
 BACKEND_UNAVAILABLE_HINT = (
-    "Model backend %r is unavailable — install the optional extras "
-    "(pip install labelImg[ai]) and check that the configured model path is valid")
+    "Model backend %r is unavailable — install from your checkout with "
+    "pip install -e \".[ai]\" (this fork isn't on PyPI) and check that the "
+    "configured model path is valid")
 
 
 class AssistController(QObject):

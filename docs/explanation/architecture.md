@@ -99,7 +99,7 @@ Canvas는 윈도우에 **7개 시그널**로 보고한다(`libs/canvas.py:24-31`
 포크 확장으로 `MainWindow`는 두 개의 얇은 컨트롤러 객체를 **생성·소유·배선**한다(`labelImg.py:444-446`):
 
 - **`InferenceService`**(QObject, `libs/inference/service.py:186`) — 모델 백엔드를 들고 단일 워커 `QThreadPool`에서 추론을 돌리고 결과를 queued 시그널로 낸다.
-- **`AssistController`**(QObject, `libs/assist/controller.py:79`) — AI 액션(Auto-label Image = Ctrl+I, Accept All = Ctrl+Return, Reject All = Ctrl+Backspace, 신뢰도 슬라이더), provisional 도형 수명주기를 소유한다. 만들어진 액션은 새 **AI 메뉴**(`labelImg.py:478`, `:504`)와 이미지-의존 액션 집합 `onLoadActive`(`labelImg.py:468-471`)에 등록되고, `toggle_actions()`가 활성화 여부를 정리한 뒤 `AssistController.refresh_actions()`가 모델 유무에 따라 다시 손본다(`labelImg.py:746`).
+- **`AssistController`**(QObject, `libs/assist/controller.py:83`) — AI 액션(Auto-label Image = Ctrl+I, Accept All = Ctrl+Return, Reject All = Ctrl+Backspace, 신뢰도 슬라이더), provisional 도형 수명주기를 소유한다. 만들어진 액션은 새 **AI 메뉴**(`labelImg.py:478`, `:504`)와 이미지-의존 액션 집합 `onLoadActive`(`labelImg.py:468-471`)에 등록되고, `toggle_actions()`가 활성화 여부를 정리한 뒤 `AssistController.refresh_actions()`가 모델 유무에 따라 다시 손본다(`labelImg.py:746`).
 
 핵심은 **경계**다: 두 컨트롤러 안의 코드가 `MainWindow`로 새어 들어오지 않는다 — `MainWindow`가 만지는 것은 생성·소유·배선과 위 저장 초크포인트의 필터 한 줄뿐이다. `libs/inference/`의 코어(`types`/`backend`/`stub`/`registry`)는 PyQt5를 import하지 않으며, 모델 백엔드는 `ModelBackend` ABC(`libs/inference/backend.py:36`, `predict`/`segment`/`embed`)라는 하나의 심(seam) 뒤에 있다 — 결정론적인 `StubBackend`와 실제 ONNX YOLO 추론을 하는 `YoloOnnxBackend`(`libs/inference/yolo_onnx.py`)가 같은 인터페이스로 교체 가능하다.
 
