@@ -16,7 +16,7 @@ NAME = 'labelImg'
 # with the code. Keep this in step with the classifiers below.
 REQUIRES_PYTHON = '>=3.7'
 REQUIRED_DEP = ['pyqt5', 'lxml']
-# `pip install labelImg[ai]`: what the ONNX model backends (libs/inference/yolo_onnx.py)
+# `pip install -e ".[ai]"`: what the ONNX model backends (libs/inference/yolo_onnx.py)
 # need, and nothing else. Deliberately OUT of REQUIRED_DEP -- labelImg stays a plain
 # annotation tool on a base install, where build_backend() simply returns None and the
 # AI actions are greyed out. onnxruntime>=1.15 is the first release whose wheels cover

@@ -1,3 +1,4 @@
+import glob
 import inspect
 import os
 import pickle
@@ -455,15 +456,55 @@ class TestBackendConfiguredButUnavailable(AssistTestCase):
 
 
 class TestNoStaleUpstreamPyPIInstruction(unittest.TestCase):
-    """Regression guard: this fork is not published to PyPI, so a bare
-    `pip install labelImg[ai]` silently fetches the unrelated upstream
+    """Regression guard: this fork is not published to PyPI, so the bare
+    upstream form of the install command (the exact string in
+    BAD_INSTRUCTION below) silently fetches the unrelated upstream
     HumanSignal package (which has none of this fork's AI code) instead of
     installing this fork's extras. Every user-facing runtime string in the AI
     seam (the disabled-action tooltips, the registry's log line, and the
     backend's MissingDependency messages) must instead point at installing
-    from this checkout -- never at the bare package name."""
+    from this checkout -- never at the bare package name.
+
+    The scan below covers the whole repo surface the wrong instruction could
+    plausibly reappear on (libs/, tests/, setup.py) -- not just the AI seam
+    modules -- because it has previously reappeared OUTSIDE that seam too:
+    as a `unittest.skipUnless` reason string in tests/test_assist.py and
+    tests/test_yolo_onnx.py, and as a comment in setup.py.
+
+    ALLOWLIST_SELF_REFERENCE (below) is the only exemption, and it is
+    narrow and explicit on purpose: the BAD_INSTRUCTION assignment line
+    itself necessarily spells out the exact banned string -- that IS what
+    makes it the source of truth this whole guard checks against -- but it
+    is not an install instruction a user could ever copy-paste and run.
+    Every OTHER occurrence found so far has been a genuine bug (a real
+    instruction someone could execute), not a documented "do NOT run this"
+    anti-pattern example, so nothing else is allowlisted. If a future
+    occurrence is a legitimate warned-against example, extend
+    ALLOWLIST_SELF_REFERENCE with an equally explicit, visibly-commented
+    entry then -- do not broaden it preemptively."""
 
     BAD_INSTRUCTION = 'pip install labelImg[ai]'
+
+    REPO_ROOT = os.path.abspath(os.path.join(dir_name, '..'))
+
+    SCAN_GLOBS = ('libs/**/*.py', 'tests/**/*.py', 'setup.py')
+
+    # (relative/path.py, exact stripped line text) pairs exempted from the
+    # repo-wide scan below -- see ALLOWLIST_SELF_REFERENCE note in the class
+    # docstring. Matched on the FULL stripped line, not a substring, so it
+    # cannot accidentally swallow a real, different offending line that
+    # merely happens to share a file with this one.
+    # Built via %r (not retyped as a literal) so THIS line does not itself
+    # recreate the exact banned string in source and require its own entry.
+    ALLOWLIST_SELF_REFERENCE = frozenset([
+        ('tests/test_assist.py', 'BAD_INSTRUCTION = %r' % BAD_INSTRUCTION),
+    ])
+
+    def _repo_py_files(self):
+        paths = []
+        for pattern in self.SCAN_GLOBS:
+            paths.extend(glob.glob(os.path.join(self.REPO_ROOT, pattern), recursive=True))
+        return sorted(set(paths))
 
     def test_hint_constants_do_not_name_the_wrong_package(self):
         self.assertNotIn(self.BAD_INSTRUCTION,
@@ -483,6 +524,30 @@ class TestNoStaleUpstreamPyPIInstruction(unittest.TestCase):
             self.assertNotIn(self.BAD_INSTRUCTION, source,
                              '%s still tells the user to run %r' %
                              (module.__name__, self.BAD_INSTRUCTION))
+
+    def test_no_file_in_the_repo_names_the_wrong_package(self):
+        # Wider than the AI-seam-only check above: the bad instruction has
+        # reappeared as a test skip-reason string and a setup.py comment,
+        # neither of which is reachable via inspect.getsource() on the AI
+        # seam modules. Scans raw text across libs/**, tests/**, and
+        # setup.py so it also catches non-code prose (comments, docstrings,
+        # string literals) anywhere in that surface.
+        failures = []
+        for path in self._repo_py_files():
+            rel = os.path.relpath(path, self.REPO_ROOT).replace(os.sep, '/')
+            with open(path, 'r', encoding='utf-8') as handle:
+                for lineno, line in enumerate(handle, start=1):
+                    if self.BAD_INSTRUCTION not in line:
+                        continue
+                    if (rel, line.strip()) in self.ALLOWLIST_SELF_REFERENCE:
+                        continue
+                    failures.append('%s:%d: %s' % (rel, lineno, line.strip()))
+        if failures:
+            self.fail(
+                '%d file(s) still tell the user to run %r (this fork is not '
+                'on PyPI under this name, so that command would silently '
+                'fetch the unrelated upstream package):\n%s'
+                % (len(failures), self.BAD_INSTRUCTION, '\n'.join(failures)))
 
 
 class TestToolTipRestoredWhenBackendBecomesAvailable(AssistTestCase):
@@ -775,7 +840,7 @@ class TestImageCarrier(unittest.TestCase):
         image.fill(0xffff0000)  # opaque red
         return image
 
-    @unittest.skipUnless(HAS_NUMPY, 'needs numpy (pip install labelImg[ai])')
+    @unittest.skipUnless(HAS_NUMPY, 'needs numpy (pip install -e ".[ai]")')
     def test_numpy_path_yields_an_hwc_array(self):
         array = to_model_image(self.make_image(65, 33))  # odd width => padded rows
 

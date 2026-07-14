@@ -119,6 +119,32 @@ Separately, every ``(NNN줄)`` claim in docs/reference/modules.md is checked
 against the file's real Python line count (``len(f.readlines())``, matching
 how the fork itself defines "line count" elsewhere in that doc).
 
+KNOWN LIMITATION: ``TestModulesLineCounts`` only compares a file's TOTAL
+line count against its ``(NNN줄)`` claim. A "compensating" edit -- N lines
+inserted above a cited symbol and N lines deleted below it, elsewhere in the
+SAME file -- leaves the total unchanged, so this tripwire stays silent even
+though every citation past the insertion point has now drifted by N lines.
+This is a deliberate, disclosed gap, not an oversight: closing it properly
+would mean either (a) a per-citation content/identity check tight enough to
+catch an N-line drift without also false-failing on ordinary, harmless
+diffs -- a decorator added above a ``def``, a multi-line signature reflowed,
+a comment inserted above a cited symbol -- all of which are exactly the
+things ``_symbol_defined_near``'s ``slack=2`` window and
+``_symbol_body_contains``'s body-span fallback exist to tolerate, or (b)
+git-history-aware drift detection, which this lint deliberately has none of
+(it only ever compares docs against the CURRENT checked-out source, per
+"WHAT THIS CHECKS" above). Either would need meaningfully more machinery
+than a doc-citation lint should carry, and (a) more precisely trades this
+gap for tighter thresholds that would newly false-fail on the common,
+harmless edits above; the risk/benefit did not favor closing it here. In
+practice this whole-file-count check is not this lint's only defence
+against drift either: any citation with a confidently-extracted symbol (see
+SYMBOL-EXTRACTION HEURISTIC above) is independently range/body-checked by
+``TestDocCitationSymbolsMatch`` regardless of whether the file's total line
+count moved at all, so a compensating edit only slips past BOTH checks for a
+citation that is simultaneously symbol-less (range-only) and lucky enough to
+still land in-bounds after drifting.
+
 NON-VACUOUSNESS
 ----------------
 As of this writing, this lint extracts and range-checks 789 citation groups
@@ -164,6 +190,8 @@ styles (see above) and so need a larger, multi-line drift to trip reliably.
 import glob
 import os
 import re
+import shutil
+import tempfile
 import unittest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -183,16 +211,54 @@ IDENT = r'[A-Za-z_][A-Za-z0-9_]*'
 # against a coincidental false match on some unrelated word).
 DOTTED_TAIL = r'(?:%s\.)*(%s)' % (IDENT, IDENT)
 
+# Same grammar as DOTTED_TAIL, but fully non-capturing -- for embedding
+# INSIDE another regex's own numbered groups (e.g. SYMBOL_GROUP_RE's repeated
+# `{2,}` block below) without shifting that regex's group indices. All three
+# symbol regexes (SYMBOL_TOKEN_RE, SYMBOL_GROUP_RE, TIGHT_PRECEDING_RE) must
+# agree on what a symbol token looks like -- an earlier version left
+# SYMBOL_GROUP_RE on plain IDENT (no dotted-tail support), so a positional
+# group containing a dotted token like `` `LabelFile.convert_points_to_bnd_box` ``
+# mis-detected the group boundary and fell through to the tight-adjacency
+# fallback, which could pair the citation with the WRONG neighbouring symbol.
+DOTTED_TAIL_NC = r'(?:%s\.)*(?:%s)' % (IDENT, IDENT)
+
 # "libs/assist/controller.py:454-473" or "controller.py:57, 177-180" -- with
 # or without a colon+number list (a bare file mention with no citation still
-# has to update the "current file" context for later bare citations).
-FULL_RE = re.compile(r'(?P<file>%s)(?:\s*:\s*(?P<nums>%s))?' % (FILE_TOKEN, NUM_LIST))
+# has to update the "current file" context for later bare citations). The
+# trailing `(?![-,\w])` anchor rejects a match that stops SHORT of a full
+# citation-shaped token -- e.g. without it, the malformed "file.py:789-"
+# would backtrack and quietly succeed as just "file.py:789", silently
+# discarding the trailing "-" with zero signal; and "file.py:123abc" would
+# truncate-match as "file.py:123", silently MIS-ACCEPTING a token that was
+# never a real citation at all (a "123abc" line-number is not this repo's
+# citation grammar in any form) as if it correctly cited line 123. `\w`
+# subsumes `\d` (already needed for "789-") and additionally rejects any
+# following letter/underscore -- including non-ASCII word characters, e.g. a
+# Korean postposition glued directly onto the number like "454-473에서"
+# ('에' is `\w` under Python's default Unicode matching) -- while still
+# allowing the real terminators a valid citation actually ends on (backtick,
+# paren, comma, whitespace, end of line: none of those are `\w`). With the
+# anchor, that optional nums group simply fails to engage at all, leaving
+# the whole ":789-"/":123abc" tail unconsumed -- which
+# TestMalformedCitationsAreNeverSilentlySkipped below (a check deliberately
+# independent of this regex) then catches and fails loudly on, naming the
+# file:line and offending text, per this module's governing principle: a
+# citation-shaped token this lint cannot fully parse must never disappear
+# silently NOR be silently mis-accepted as valid.
+FULL_RE = re.compile(
+    r'(?P<file>%s)(?:\s*:\s*(?P<nums>%s)(?![-,\w]))?' % (FILE_TOKEN, NUM_LIST))
 
 # "`:454`" / "(:454)" / "`:454`/`:475`" -- a citation with no filename of its
 # own, relying on context. Deliberately requires a backtick/paren delimiter
 # immediately around the colon (the only form actually used in this repo),
-# to keep this from matching incidental "12:30"-shaped text elsewhere.
-BARE_RE = re.compile(r'[`(]\s*:\s*(?P<nums>%s)\s*[`)]' % NUM_LIST)
+# to keep this from matching incidental "12:30"-shaped text elsewhere. The
+# same `(?![-,\w])` anchor as FULL_RE guards against a truncated number list
+# masquerading as a complete one (belt-and-suspenders: the mandatory closing
+# backtick/paren already rejects truncated forms like "`:789-`" or
+# "`:123abc`" today via the `\s*[`)]` requirement immediately after, but the
+# explicit anchor keeps this regex correct even if that requirement is ever
+# loosened).
+BARE_RE = re.compile(r'[`(]\s*:\s*(?P<nums>%s)(?![-,\w])\s*[`)]' % NUM_LIST)
 
 # One backtick-quoted identifier (optionally dotted, see DOTTED_TAIL above),
 # optionally with a trailing "()" marking it as a function/method (stripped --
@@ -201,9 +267,11 @@ SYMBOL_TOKEN_RE = re.compile(r'`%s(?:\(\))?`' % DOTTED_TAIL)
 
 # 2+ symbols followed (optionally after whitespace, e.g. "`A`/`B` (`:10`/`:30`)")
 # by "(...)" with no nested parens -- candidate for positional list pairing
-# against the citations inside.
+# against the citations inside. Uses DOTTED_TAIL_NC (see above) so a group
+# containing dotted tokens like `` `LabelFile.convert_points_to_bnd_box` ``
+# is recognised as a single symbol, matching SYMBOL_TOKEN_RE/TIGHT_PRECEDING_RE.
 SYMBOL_GROUP_RE = re.compile(
-    r'((?:`%s(?:\(\))?`(?:\s*/\s*)?){2,})\s*\(([^()]*)\)' % IDENT)
+    r'((?:`%s(?:\(\))?`(?:\s*/\s*)?){2,})\s*\(([^()]*)\)' % DOTTED_TAIL_NC)
 
 # Tight adjacency: a single backtick-symbol (optionally dotted, e.g.
 # `` `AssistController._is_current` `` -- only the trailing method/attribute
@@ -297,7 +365,11 @@ def _constructs(path):
 
 
 def _parse_num_list(text):
-    """'57, 177-180' -> [(57, 57), (177, 180)]"""
+    """'57, 177-180' -> [(57, 57), (177, 180)]
+
+    Raises ValueError (not `assert`, which `python -O` strips silently) on a
+    reversed range like '200-100' -- a citation whose start line is after its
+    end line is never a valid line span."""
     ranges = []
     for chunk in text.split(','):
         chunk = chunk.strip()
@@ -306,11 +378,162 @@ def _parse_num_list(text):
             start, end = int(start), int(end)
         else:
             start = end = int(chunk)
-        assert start <= end, (
-            'malformed citation range %r in %r: start (%d) is after end (%d) '
-            '-- a reversed range is never a valid line span' % (chunk, text, start, end))
+        if start > end:
+            raise ValueError(
+                'malformed citation range %r in %r: start (%d) is after end (%d) '
+                '-- a reversed range is never a valid line span' % (chunk, text, start, end))
         ranges.append((start, end))
     return ranges
+
+
+# --- Malformed-citation detector --------------------------------------------
+#
+# GOVERNING PRINCIPLE: this lint must never silently skip -- nor silently
+# MIS-ACCEPT -- a citation-shaped token it cannot fully parse. FULL_RE/BARE_RE
+# above are anchored with a trailing `(?![-,\w])` so they never MATCH a
+# truncated citation like "file.py:789-", "`:789-`", or "file.py:123abc" (the
+# last of which, without the anchor, would truncate-match "123" and silently
+# MIS-ACCEPT a token that was never a real citation as if it validly pointed
+# at line 123). But refusing to match just makes the malformed token
+# disappear from the citation set with zero signal, which is the exact
+# failure this detector exists to close: it scans independently for anything
+# that LOOKS like an attempted citation and demands the text after the colon
+# be either genuinely not a citation attempt at all (see below), or a
+# complete, well-formed, start<=end NUM_LIST not glued onto more text.
+#
+# Everything that could plausibly be part of a (possibly malformed) NUM_LIST
+# attempt: digits, hyphens, commas, and the whitespace NUM_LIST itself
+# tolerates around commas. Deliberately excludes letters, so ordinary prose
+# immediately after a "file.py:" colon -- e.g. this very module docstring's
+# own citation-format examples, `` `file.py:line` `` / `` `file.py:NNN` `` --
+# is not mistaken for a citation attempt: "line"/"NNN" contain zero
+# characters from this class, so nothing is captured and the following
+# letter tells the detector this is prose, not a truncated number list.
+_ATTEMPT_CHARS = r'[\d,\s-]*'
+
+NUM_LIST_FULLMATCH_RE = re.compile(r'^%s$' % NUM_LIST)
+
+# "libs/labelFile.py:" (+ an attempted, possibly malformed/empty, number
+# list) -- anchored on FILE_TOKEN, so it fires regardless of whether the
+# citation is backtick/paren-wrapped.
+FILE_COLON_ATTEMPT_RE = re.compile(
+    r'(?P<file>%s)\s*:\s*(?P<attempt>%s)' % (FILE_TOKEN, _ATTEMPT_CHARS))
+
+# "`:" or "(:" (+ an attempted number list) -- the bare-citation equivalent.
+BARE_COLON_ATTEMPT_RE = re.compile(
+    r'(?P<open>[`(])\s*:\s*(?P<attempt>%s)' % _ATTEMPT_CHARS)
+
+
+def _is_word_char(ch):
+    """True for anything FULL_RE/BARE_RE's `(?![-,\\w])` anchor also rejects
+    as a citation terminator -- ASCII letters/digits/underscore AND any other
+    Unicode "word" character (Python's `\\w` is Unicode-aware by default),
+    which covers e.g. a Korean postposition glued directly onto a number
+    like "454-473에서" ('에' is `\\w`). Never true for the real terminators a
+    valid citation actually ends on: backtick, paren, comma, whitespace, or
+    end of line/string."""
+    return bool(ch) and (ch.isalnum() or ch == '_')
+
+
+def _malformed_attempt_message(where, prefix_text, attempt, following, allow_empty):
+    """None if `attempt` (the text right after a citation-shaped colon) is
+    either a well-formed NUM_LIST or genuinely not a citation attempt at
+    all; otherwise a failure string naming `where` and the offending raw
+    text. `following` is the raw text immediately after `attempt` (used both
+    to classify what comes next and to show it in a failure message).
+
+    `allow_empty` controls whether a completely empty attempt (no digits at
+    all) is flagged when immediately closed by a backtick/paren:
+    - For a FILE_TOKEN-anchored colon (e.g. "libs/labelFile.py:`"), this is
+      unambiguous -- a `.py` file mention immediately followed by an empty,
+      delimiter-closed colon is always an abandoned/forgotten citation, so
+      `allow_empty` is False (empty IS flagged) there.
+    - For a bare "`:"/"(:"-anchored colon, the opening delimiter is
+      indistinguishable from the CLOSING backtick of some earlier, unrelated
+      token followed by ordinary prose punctuation -- e.g. (from
+      docs/reference/modules.md) `` `:85-88`: `stub`/`yolo_onnx` ``, where
+      the second colon is just "table: description" prose, not a citation.
+      BARE_RE itself sidesteps this ambiguity by requiring a MANDATORY
+      number list (never optional), so this detector matches that same
+      convention and does not flag an empty bare attempt; `allow_empty` is
+      True (empty is NOT flagged) there. A non-empty-but-malformed bare
+      attempt (e.g. "`:789-`") is unambiguous and still always flagged.
+    """
+    stripped = attempt.strip()
+    next_char = following[:1]
+
+    if stripped == '':
+        if allow_empty:
+            return None
+        if next_char in ('`', ')'):
+            return ('%s: citation-shaped text %r has a colon with NO line '
+                     'number before the closing delimiter -- an abandoned '
+                     'or forgotten citation, not a valid range'
+                     % (where, prefix_text + ':'))
+        return None  # ordinary prose colon (e.g. "`file.py:line`") -- not a citation attempt
+
+    if not NUM_LIST_FULLMATCH_RE.match(stripped):
+        return ('%s: citation-shaped text %r looks like a truncated or '
+                 'malformed line-number list (it does not fully match a '
+                 'well-formed number/range list -- e.g. a trailing "-", a '
+                 'trailing ",", or a dangling range)'
+                 % (where, prefix_text + ':' + attempt))
+
+    # The numeric prefix parses cleanly on its own, but a well-formed NUM_LIST
+    # match glued directly onto more word-characters with no delimiter in
+    # between (e.g. "123abc", or "454-473에서") is not a citation at all --
+    # it is a truncated match on unrelated text. Silently accepting it would
+    # be worse than a silent skip: it would MIS-ACCEPT a non-citation token
+    # as if it validly pointed at a real line number. See the `(?![-,\w])`
+    # anchor on FULL_RE/BARE_RE above -- this is the same check, applied to
+    # this independent detector's own (deliberately looser) attempt capture.
+    if _is_word_char(next_char):
+        return ('%s: citation-shaped text %r is a well-formed-looking number '
+                 'list glued directly onto more text with no delimiter in '
+                 'between (%r follows) -- not a real citation; silently '
+                 'accepting this would MIS-ACCEPT it as validly citing '
+                 'line(s) %s' % (where, prefix_text + ':' + attempt,
+                                 following, stripped))
+
+    try:
+        _parse_num_list(stripped)
+    except ValueError as exc:
+        return '%s: citation-shaped text %r is malformed: %s' % (
+            where, prefix_text + ':' + attempt, exc)
+
+    return None
+
+
+def _malformed_citation_shapes_in_doc(doc_path):
+    """Scan `doc_path` for anything citation-shaped that FULL_RE/BARE_RE
+    could not fully parse into a well-formed citation, and return a list of
+    failure strings (empty if the whole doc is clean). See the
+    "Malformed-citation detector" comment block above for why this exists as
+    a check deliberately independent from FULL_RE/BARE_RE themselves."""
+    failures = []
+    with open(doc_path, 'r', encoding='utf-8') as handle:
+        doc_lines = handle.readlines()
+
+    for lineno, line in enumerate(doc_lines, start=1):
+        where = '%s:%d' % (_repo_relative(doc_path), lineno)
+        for match in FILE_COLON_ATTEMPT_RE.finditer(line):
+            attempt = match.group('attempt')
+            end = match.end('attempt')
+            following = line[end:end + 12]
+            msg = _malformed_attempt_message(
+                where, match.group('file'), attempt, following, allow_empty=False)
+            if msg:
+                failures.append(msg)
+        for match in BARE_COLON_ATTEMPT_RE.finditer(line):
+            attempt = match.group('attempt')
+            end = match.end('attempt')
+            following = line[end:end + 12]
+            msg = _malformed_attempt_message(
+                where, match.group('open'), attempt, following, allow_empty=True)
+            if msg:
+                failures.append(msg)
+
+    return failures
 
 
 def _fmt_range(start, end):
@@ -504,6 +727,186 @@ class TestDocCitationsExist(unittest.TestCase):
             % len(self.all_citations))
         print('\n[test_doc_citations] guarding %d citation group(s) across '
              '%d doc file(s)' % (len(self.all_citations), len(_doc_paths())))
+
+
+class TestMalformedCitationsAreNeverSilentlySkipped(unittest.TestCase):
+    """GOVERNING PRINCIPLE: if this lint finds a citation-shaped token it
+    cannot fully parse, that must be a hard failure naming the file:line and
+    offending text -- never a silent skip, and never a silent MIS-ACCEPT.
+    FULL_RE/BARE_RE are anchored so a truncated citation like "file.py:789-",
+    "`:789-`", or "file.py:123abc" never MATCHES, but a regex that just
+    refuses to match a malformed token makes it vanish from the citation set
+    with zero signal (or, for "123abc", would truncate-match and silently
+    accept "123" as a real citation to line 123 if the anchor were weaker) --
+    this test is the independent tripwire that catches both failure modes
+    (see the "Malformed-citation detector" comment block above
+    `_ATTEMPT_CHARS` for the full mechanism)."""
+
+    def test_no_doc_has_an_unparseable_citation_shaped_token(self):
+        failures = []
+        for doc_path in _doc_paths():
+            failures.extend(_malformed_citation_shapes_in_doc(doc_path))
+        if failures:
+            self.fail('%d malformed citation-shaped token(s) found -- a '
+                      'citation this lint could not fully parse must never '
+                      'disappear silently:\n\n%s'
+                      % (len(failures), '\n\n'.join(failures)))
+
+
+class TestMalformedCitationDetectorItself(unittest.TestCase):
+    """Exercises `_malformed_citation_shapes_in_doc` -- the actual function
+    the test above runs against the real doc surface -- directly, against
+    controlled fixtures the real doc surface does not (and must not)
+    contain. This is what proves the detector really catches what it claims
+    to, not merely that the real docs happen to be clean."""
+
+    def _check(self, snippet):
+        # dir=REPO_ROOT: on Windows, os.path.relpath (used by _repo_relative,
+        # which this exercises) raises ValueError across drive letters, and
+        # the platform default tempdir is not guaranteed to share a drive
+        # with the repo checkout.
+        fixture_dir = tempfile.mkdtemp(prefix='doc_citation_lint_fixture_', dir=REPO_ROOT)
+        try:
+            fixture_path = os.path.join(fixture_dir, 'fixture.md')
+            with open(fixture_path, 'w', encoding='utf-8') as handle:
+                handle.write(snippet)
+            return _malformed_citation_shapes_in_doc(fixture_path)
+        finally:
+            shutil.rmtree(fixture_dir)
+
+    def test_trailing_hyphen_after_full_citation_is_caught(self):
+        # FULL_RE backtracks "789-" down to just "789" and would otherwise
+        # silently drop the trailing "-" with zero signal.
+        failures = self._check('see `libs/labelFile.py:789-` for details\n')
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn('789-', failures[0])
+
+    def test_trailing_hyphen_after_bare_citation_is_caught(self):
+        # A bare "`:789-`" fails BARE_RE entirely (no closing delimiter
+        # immediately after the number list) and vanishes with zero signal.
+        failures = self._check(
+            '`libs/labelFile.py:100` and also `:789-` nearby\n')
+        self.assertTrue(any('789-' in f for f in failures), failures)
+
+    def test_missing_line_number_is_caught(self):
+        failures = self._check('nothing here: `libs/labelFile.py:`\n')
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn('labelFile.py:', failures[0])
+
+    def test_reversed_range_is_caught(self):
+        failures = self._check('`libs/labelFile.py:200-100`\n')
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn('200', failures[0])
+        self.assertIn('100', failures[0])
+
+    def test_trailing_comma_is_caught(self):
+        failures = self._check('`libs/labelFile.py:57,`\n')
+        self.assertEqual(1, len(failures), failures)
+
+    def test_number_glued_to_trailing_letters_is_caught(self):
+        # Regression for a Codex review finding: without the `(?![-,\w])`
+        # anchor (extended from `(?![-,\d])`), FULL_RE truncate-matches
+        # "controller.py:123abc" as just "controller.py:123" and silently
+        # MIS-ACCEPTS it as a valid citation to line 123 -- worse than a
+        # silent skip, since the token never disappears, it gets accepted as
+        # something it is not.
+        failures = self._check('see `libs/controller.py:123abc` for details\n')
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn('123', failures[0])
+
+    def test_number_glued_to_korean_postposition_is_caught(self):
+        # Same failure class as the ASCII case above, but with a Korean
+        # postposition glued directly onto the number with no delimiter --
+        # `\w` is Unicode-aware, so this must be caught too, not just ASCII
+        # suffixes.
+        failures = self._check('`libs/labelFile.py:454-473에서` 문제가 생긴다\n')
+        self.assertEqual(1, len(failures), failures)
+        self.assertIn('454-473', failures[0])
+
+    def test_korean_postposition_after_a_closed_citation_is_not_flagged(self):
+        # Contrast case: this repo's docs routinely follow a real,
+        # backtick-closed citation with a Korean postposition, e.g.
+        # "...`(labelImg.py:1058-1069)`가 호출자가...". The postposition
+        # comes AFTER the closing delimiter, not glued onto the number
+        # itself, so this must NOT be flagged.
+        failures = self._check('`libs/labelFile.py:454-473`에서 문제가 생긴다\n')
+        self.assertEqual([], failures)
+
+    def test_well_formed_citation_is_not_flagged(self):
+        failures = self._check('`libs/labelFile.py:182-205`\n')
+        self.assertEqual([], failures)
+
+    def test_well_formed_comma_list_is_not_flagged(self):
+        failures = self._check('`controller.py:57, 177-180`\n')
+        self.assertEqual([], failures)
+
+    def test_prose_placeholder_is_not_flagged(self):
+        # Mirrors this module's own docstring usage: "`file.py:line`" /
+        # "`file.py:NNN`" describe the citation FORMAT, they are not
+        # themselves citations, and must not be mistaken for malformed ones.
+        failures = self._check(
+            'cite as `file.py:line` or `file.py:NNN` in this repo\n')
+        self.assertEqual([], failures)
+
+    def test_term_colon_prose_after_a_real_citation_is_not_flagged(self):
+        # Mirrors a real occurrence in docs/reference/modules.md: a closing
+        # backtick of an unrelated earlier token immediately followed by
+        # ordinary "term: description" prose punctuation must not be
+        # mistaken for an abandoned bare citation.
+        failures = self._check(
+            '이름→백엔드 생성 테이블(`:85-88`: `stub`/`yolo_onnx`)\n')
+        self.assertEqual([], failures)
+
+
+class TestSymbolGroupRegexAgreesOnDottedNames(unittest.TestCase):
+    """Regression test for SYMBOL_GROUP_RE: it must agree with
+    SYMBOL_TOKEN_RE/TIGHT_PRECEDING_RE about what a symbol token looks like,
+    including DOTTED tokens like `` `AssistController.accept_all` ``. An
+    earlier version left SYMBOL_GROUP_RE on plain IDENT (no dotted-tail
+    support), so a positional-list group containing a dotted token failed to
+    match SYMBOL_GROUP_RE at all -- every symbol in that group then fell
+    through to the tight-adjacency fallback (mechanism 2), which can
+    associate the WRONG symbol with a citation when a group has more than
+    one citation. This is exercised against a synthetic fixture, not the
+    real doc surface: as of this writing, every dotted positional-list-
+    shaped mention in the real docs (see docs/how-to/verify-and-difficult.md
+    and docs/explanation/ml-assist-architecture.md) happens to share ONE
+    citation across multiple symbols, which mechanism 1 correctly declines
+    to pair (its symbol/citation counts must match) regardless of this fix
+    -- so this fix currently changes zero real citations' pairing, but it
+    would misfire on the very first doc that DOES cite two dotted symbols
+    against two separate citations, which is exactly the shape this test
+    fixture uses."""
+
+    def _extract(self, snippet):
+        fixture_dir = tempfile.mkdtemp(prefix='doc_citation_lint_fixture_', dir=REPO_ROOT)
+        try:
+            fixture_path = os.path.join(fixture_dir, 'fixture.md')
+            with open(fixture_path, 'w', encoding='utf-8') as handle:
+                handle.write(snippet)
+            return _extract_citations_from_doc(fixture_path)
+        finally:
+            shutil.rmtree(fixture_dir)
+
+    def test_dotted_symbols_pair_with_their_own_citation_not_their_neighbours(self):
+        # File-path citations (not bare `:NNN`) deliberately, since the
+        # positional split is "/"-delimited and a file path also contains
+        # "/" -- using bare citations (as this repo's docs actually do for
+        # this exact form, e.g. "`accept_all`/`reject_all`(`:454`/`:475`)")
+        # sidesteps that unrelated ambiguity and isolates what this test is
+        # actually about: whether SYMBOL_GROUP_RE recognises a DOTTED symbol
+        # as one token of the "/"-separated list at all.
+        citations = self._extract(
+            '`libs/assist/controller.py:1` establishes context.\n'
+            '`AssistController.accept_all`/`AssistController.reject_all`'
+            '(`:454`/`:475`)\n')
+        dotted = [c for c in citations if c.ranges[0][0] in (454, 475)]
+        self.assertEqual(2, len(dotted), dotted)
+        by_start = sorted(dotted, key=lambda c: c.ranges[0][0])
+        self.assertEqual('accept_all', by_start[0].symbol)
+        self.assertEqual([(454, 454)], by_start[0].ranges)
+        self.assertEqual('reject_all', by_start[1].symbol)
+        self.assertEqual([(475, 475)], by_start[1].ranges)
 
 
 class TestDocCitationSymbolsMatch(unittest.TestCase):

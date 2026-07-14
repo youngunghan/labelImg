@@ -689,7 +689,7 @@ class TestZeroDependencyImport(unittest.TestCase):
         self.assertEqual('False', self.run_probe(source))
 
 
-@unittest.skipUnless(HAS_NUMPY, 'needs numpy (pip install labelImg[ai])')
+@unittest.skipUnless(HAS_NUMPY, 'needs numpy (pip install -e ".[ai]")')
 class TestPredictWithFakeSession(unittest.TestCase):
     """The real predict() path -- letterbox, feed, decode -- with a fake session.
 
@@ -1088,7 +1088,7 @@ def build_onnx_model(input_shape, output_dims, output_values, metadata):
 
 
 @unittest.skipUnless(HAS_NUMPY and HAS_ONNXRUNTIME,
-                     'needs numpy + onnxruntime (pip install labelImg[ai])')
+                     'needs numpy + onnxruntime (pip install -e ".[ai]")')
 class TestRealOnnxModel(unittest.TestCase):
     """One end-to-end run through a real onnxruntime session."""
 
