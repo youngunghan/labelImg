@@ -97,20 +97,20 @@ settings.save()
 2. **`Ctrl+I`** (`Auto-label Image`) — 현재 이미지에 모델을 돌려 박스를 **제안**으로 올린다
    (`SHORTCUT_AUTO_LABEL`, `libs/assist/controller.py:57`). 이미지가 열려 있고 백엔드가 사용 가능할 때만
    활성화된다. 다시 누르면 이전 라운드의 제안을 지우고 새로 돌린다(`auto_label_image`,
-   `libs/assist/controller.py:320-341`).
+   `libs/assist/controller.py:347-368`).
 3. 제안 박스는 **점선 + 반투명**으로 그려져 실제 박스와 한눈에 구별된다(`Shape.provisional`,
    `libs/shape.py:62`,`110`,`132`,`159-162`). 각 제안에는 모델이 매긴 신뢰도(`Shape.confidence`)가 함께
    붙는다.
 4. **Confidence Threshold** 슬라이더를 움직이면 이미 받은 검출 결과 중 임계값 이상인 것만 다시
    그려진다 — **모델을 다시 돌리지 않는다**(`AssistController.set_threshold`/`_sync_suggestions`,
-   `libs/assist/controller.py:299-316`,`417-452`). 슬라이더는 탐색용이라 실시간으로 켜고 끌 수 있다.
+   `libs/assist/controller.py:326-343`,`444-479`). 슬라이더는 탐색용이라 실시간으로 켜고 끌 수 있다.
 5. **`Ctrl+Return`** (`Accept All Suggestions`) — 화면의 모든 제안을 한 번에 **진짜 박스로 승격**한다.
    승격된 박스는 점선/반투명이 풀리고 일반 색으로 바뀌며, 라벨이 클래스 목록에 없었다면 자동으로
-   추가된다(`accept_all`, `libs/assist/controller.py:454-473`).
+   추가된다(`accept_all`, `libs/assist/controller.py:481-500`).
 6. **`Ctrl+Backspace`** (`Reject All Suggestions`) — 화면의 모든 제안을 한 번에 버린다(`reject_all`,
-   `libs/assist/controller.py:475-486`).
+   `libs/assist/controller.py:502-513`).
 7. 물론 제안 하나하나를 캔버스에서 골라 `Delete`로 개별적으로 지울 수도 있다 — 지운 제안은 임계값을
-   다시 움직여도 되살아나지 않는다(`discard_shape`, `libs/assist/controller.py:398-415`).
+   다시 움직여도 되살아나지 않는다(`discard_shape`, `libs/assist/controller.py:425-442`).
 
 ## 제안은 받아들이기 전까지 저장되지 않는다
 

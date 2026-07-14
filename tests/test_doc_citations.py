@@ -424,6 +424,33 @@ BARE_COLON_ATTEMPT_RE = re.compile(
     r'(?P<open>[`(])\s*:\s*(?P<attempt>%s)' % _ATTEMPT_CHARS)
 
 
+def _attempt_following(match, line):
+    """The 12 raw characters right after `attempt`'s real (non-whitespace)
+    extent in `line` -- what `_malformed_attempt_message` inspects as
+    `following`/`next_char`.
+
+    `_ATTEMPT_CHARS` (``[\\d,\\s-]*``) is greedy over whitespace, so on an
+    UNWRAPPED citation (no backtick/paren delimiter) -- e.g.
+    "foo.py:123 followed by prose" -- the `attempt` capture also swallows
+    the space(s) separating the citation from ordinary prose that follows it
+    on the same line ("123 ", not "123"). Basing `following` on
+    ``match.end('attempt')`` would then start reading past that space,
+    landing on the prose itself and making `_is_word_char` misread a
+    well-formed, space-delimited citation as "glued directly onto more text
+    with no delimiter in between" -- a false loud failure on valid input.
+    Rewinding past only the whitespace `attempt` actually consumed keeps the
+    real delimiter (the space itself) as `following`'s first character, so
+    the glued-text check still fires for genuinely glued text (e.g.
+    "123abc", where `attempt` never consumes "abc" in the first place, so
+    there is no trailing whitespace to rewind past) while no longer
+    misfiring on valid unwrapped citations followed by prose.
+    """
+    attempt = match.group('attempt')
+    trailing_ws = len(attempt) - len(attempt.rstrip())
+    end = match.end('attempt') - trailing_ws
+    return line[end:end + 12]
+
+
 def _is_word_char(ch):
     """True for anything FULL_RE/BARE_RE's `(?![-,\\w])` anchor also rejects
     as a citation terminator -- ASCII letters/digits/underscore AND any other
@@ -518,16 +545,14 @@ def _malformed_citation_shapes_in_doc(doc_path):
         where = '%s:%d' % (_repo_relative(doc_path), lineno)
         for match in FILE_COLON_ATTEMPT_RE.finditer(line):
             attempt = match.group('attempt')
-            end = match.end('attempt')
-            following = line[end:end + 12]
+            following = _attempt_following(match, line)
             msg = _malformed_attempt_message(
                 where, match.group('file'), attempt, following, allow_empty=False)
             if msg:
                 failures.append(msg)
         for match in BARE_COLON_ATTEMPT_RE.finditer(line):
             attempt = match.group('attempt')
-            end = match.end('attempt')
-            following = line[end:end + 12]
+            following = _attempt_following(match, line)
             msg = _malformed_attempt_message(
                 where, match.group('open'), attempt, following, allow_empty=True)
             if msg:
@@ -846,6 +871,23 @@ class TestMalformedCitationDetectorItself(unittest.TestCase):
         # themselves citations, and must not be mistaken for malformed ones.
         failures = self._check(
             'cite as `file.py:line` or `file.py:NNN` in this repo\n')
+        self.assertEqual([], failures)
+
+    def test_unwrapped_citation_followed_by_prose_is_not_flagged(self):
+        # Regression: _ATTEMPT_CHARS is greedy over whitespace, so on an
+        # UNWRAPPED citation (no backtick/paren delimiter) the `attempt`
+        # capture used to also swallow the space separating the citation
+        # from ordinary prose that follows it on the same line -- "123 ",
+        # not "123" -- making `following`/`next_char` start past that space,
+        # on the prose itself. `_is_word_char` then misread the first letter
+        # of "followed" as glued directly onto the number with no delimiter
+        # in between, and falsely flagged this well-formed, standalone
+        # citation. There are zero live instances of this shape in the repo
+        # today (every real citation in these docs is backtick-wrapped), so
+        # this was dormant, not yet a false failure in practice -- but
+        # nothing stopped a future unwrapped citation from tripping it.
+        failures = self._check(
+            'see libs/labelFile.py:182 followed by prose text\n')
         self.assertEqual([], failures)
 
     def test_term_colon_prose_after_a_real_citation_is_not_flagged(self):

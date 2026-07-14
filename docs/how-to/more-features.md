@@ -6,27 +6,27 @@
 
 > **주의: 파괴적 동작.** `g`/`b`는 수정자 없는 단일 키라 실수로 눌리기 쉽다. 누르는 즉시 **현재 이미지와 그 라벨 파일이 디스크에서 다른 폴더로 이동**한다.
 
-데이터셋을 빠르게 선별(검수)할 때, 현재 이미지를 좋은/나쁜 더미로 분류한다(`classify_current_image`, `labelImg.py:1752`):
+데이터셋을 빠르게 선별(검수)할 때, 현재 이미지를 좋은/나쁜 더미로 분류한다(`classify_current_image`, `labelImg.py:1771`):
 
 - `g` (Classify Good) → 현재 이미지 + 라벨을 `<연 폴더>_good/` 으로 이동
 - `b` (Classify Bad) → `<연 폴더>_bad/` 으로 이동
-- `Ctrl+Z` (Undo Classify) → 가장 최근 이동을 원위치로 되돌림(`undo_classify`, `labelImg.py:1909`)
+- `Ctrl+Z` (Undo Classify) → 가장 최근 이동을 원위치로 되돌림(`undo_classify`, `labelImg.py:1928`)
 
 분류 동작들은 File 메뉴(카테고리별 `Classify <이름> (<키> → _<이름>)` / Undo Classify / Edit Classify Categories, `labelImg.py:500-503`)에도 있으며, `g`/`b`는 이미지가 로드되기 전에는 비활성이다(`onLoadActive`, `labelImg.py:468-471`).
 
 동작 상세:
 - **`Open Dir`로 폴더를 먼저 열어야** 한다(아니면 상태바에 안내만 뜨고 아무 일도 안 함).
-- **현재 이미지가 열린 디렉터리 목록(`m_img_list`)에 속할 때만 동작**한다(`labelImg.py:1764-1766`). `Open File`로 목록 밖 단일 파일을 연 상태에서는 차단된다 — 예전 `last_open_dir` 값 기준의 엉뚱한 `_good`/`_bad` 폴더로 이동하는 사고를 막기 위한 가드.
+- **현재 이미지가 열린 디렉터리 목록(`m_img_list`)에 속할 때만 동작**한다(`labelImg.py:1783-1785`). `Open File`로 목록 밖 단일 파일을 연 상태에서는 차단된다 — 예전 `last_open_dir` 값 기준의 엉뚱한 `_good`/`_bad` 폴더로 이동하는 사고를 막기 위한 가드.
 - 대상 폴더는 연 폴더의 **형제** 폴더 `os.path.dirname(연폴더) + "/<연폴더이름>_good"`(또는 `_bad`)에 자동 생성된다.
 - 이미지(`shutil.move`)와 **대응 라벨(.xml/.txt/.json)** 을 같은 stem으로 함께 옮긴다. 라벨은 기본 저장 폴더(`default_save_dir`)에서 먼저 찾고, 없으면 이미지 옆 폴더에서도 찾는다. 라벨을 못 찾아 이미지만 옮겨지면 상태바에 "no label file found to move" 경고가 표시된다.
-  - ✅ **원자적**: 라벨 이동이 하나라도 실패하면(권한/잠금 등) 이미 옮긴 이미지·라벨을 모두 원위치로 되돌리고(`_rollback`) "Classify failed" 경고를 띄운다(`labelImg.py:1865-1884`). 따라서 이미지만 옮겨지고 라벨이 원래 폴더에 남는 어긋남은 생기지 않는다. 되돌리기까지 실패하면(드묾) "일부 파일이 남았을 수 있으니 확인하라"고 명시적으로 알리고, 이번에 새로 만든 빈 `_good`/`_bad` 폴더는 정리한다.
+  - ✅ **원자적**: 라벨 이동이 하나라도 실패하면(권한/잠금 등) 이미 옮긴 이미지·라벨을 모두 원위치로 되돌리고(`_rollback`) "Classify failed" 경고를 띄운다(`labelImg.py:1884-1903`). 따라서 이미지만 옮겨지고 라벨이 원래 폴더에 남는 어긋남은 생기지 않는다. 되돌리기까지 실패하면(드묾) "일부 파일이 남았을 수 있으니 확인하라"고 명시적으로 알리고, 이번에 새로 만든 빈 `_good`/`_bad` 폴더는 정리한다.
   - ⚠️ **YOLO 주의**: 분류는 `<stem>.txt`만 옮기고 공용 `classes.txt`는 옮기지 않는다 — `_good`/`_bad` 폴더의 YOLO 라벨을 단독으로 쓰려면 `classes.txt`를 따로 복사해야 한다.
 - 대상 폴더에 같은 이름이 있으면 `_1`, `_2` … 로 충돌을 피한다(dedup).
 - 미저장 변경이 있으면 저장/폐기/취소를 먼저 묻는다.
 - 이동 후 디렉터리를 다시 스캔하고 다음 이미지로 넘어간다.
 - `classify_history`에 이동 기록이 쌓여 `Ctrl+Z`로 순서대로 되돌릴 수 있다.
-- `Ctrl+Z` 성공 시 디렉터리를 다시 스캔하고 복원된 이미지를 자동으로 다시 연다(`labelImg.py:1939-1946`).
-- 되돌리기 도중 일부 파일 복원이 실패하면 "Undo failed" 경고가 뜨고 이동 기록은 보존되므로, 원인(잠금/권한)을 해소한 뒤 `Ctrl+Z`를 다시 누르면 남은 파일부터 이어서 복원된다(`undo_classify`, `labelImg.py:1921-1932`).
+- `Ctrl+Z` 성공 시 디렉터리를 다시 스캔하고 복원된 이미지를 자동으로 다시 연다(`labelImg.py:1958-1965`).
+- 되돌리기 도중 일부 파일 복원이 실패하면 "Undo failed" 경고가 뜨고 이동 기록은 보존되므로, 원인(잠금/권한)을 해소한 뒤 `Ctrl+Z`를 다시 누르면 남은 파일부터 이어서 복원된다(`undo_classify`, `labelImg.py:1940-1951`).
 
 판정은 **자동이 아니라** 사용자가 누른 키로만 정해진다.
 
@@ -35,19 +35,19 @@
 g/good·b/bad는 **기본값**일 뿐이다. **File > Edit Classify Categories**에서 한 줄에
 `<단축키> <폴더이름>` 형식으로 원하는 N개 카테고리(예: `k keep` / `x trash` / `r review`)를
 정의하면 메뉴·단축키가 **재시작 없이** 재구성되고(`rebuild_classify_actions`,
-`labelImg.py:2020`), 설정 pkl(`classifyTargets`)에 영구 저장된다. 중복 단축키는
+`labelImg.py:2039`), 설정 pkl(`classifyTargets`)에 영구 저장된다. 중복 단축키는
 거부된다. 이동 대상은 항상 `<현재폴더>_<이름>` 형제 폴더이고, 원자성·`Ctrl+Z` undo는
 카테고리 수와 무관하게 동일하게 동작한다.
 
 ## 이전 이미지의 박스 복사 (`Ctrl+V`)
 
-`Copy Previous Bounding Boxes`(`copy_previous_bounding_boxes`, `labelImg.py:2316`)는 **바로 이전 이미지의 어노테이션을 현재 이미지에 그대로 올리고 즉시 저장**한다. 연속 프레임/영상 캡처처럼 객체 위치가 거의 같은 이미지를 빠르게 라벨링할 때 유용하다. **File 메뉴**에 등록돼 있다(`labelImg.py:501`). **`Open Dir`로 연 이미지 목록 안에서만 동작**한다(목록의 이전 이미지를 참조하므로) — `Open File`로 단독으로 연 파일에서는 조용히 무시된다(현재 파일이 `m_img_list`에 없으면 그대로 반환하는 가드, `labelImg.py:2317-2318`).
+`Copy Previous Bounding Boxes`(`copy_previous_bounding_boxes`, `labelImg.py:2335`)는 **바로 이전 이미지의 어노테이션을 현재 이미지에 그대로 올리고 즉시 저장**한다. 연속 프레임/영상 캡처처럼 객체 위치가 거의 같은 이미지를 빠르게 라벨링할 때 유용하다. **File 메뉴**에 등록돼 있다(`labelImg.py:501`). **`Open Dir`로 연 이미지 목록 안에서만 동작**한다(목록의 이전 이미지를 참조하므로) — `Open File`로 단독으로 연 파일에서는 조용히 무시된다(현재 파일이 `m_img_list`에 없으면 그대로 반환하는 가드, `labelImg.py:2336-2337`).
 
 ## 사전 정의 클래스 앱에서 편집 (`Ctrl+Shift+E`)
 
-`File → Edit Default Classes`(`Ctrl+Shift+E`, `edit_default_classes`, `labelImg.py:2142`)는 여러 줄 입력창을 띄워 클래스 목록을 받고 **`predefined_classes.txt`를 영구적으로 덮어쓴다**. 저장 후 라벨 히스토리·`w` 라벨 입력창·use-default-label 콤보박스를 즉시 갱신한다. 파일을 직접 편집하지 않고 앱 안에서 클래스를 관리할 수 있다. (메뉴 위치는 File, `labelImg.py:503`.)
+`File → Edit Default Classes`(`Ctrl+Shift+E`, `edit_default_classes`, `labelImg.py:2161`)는 여러 줄 입력창을 띄워 클래스 목록을 받고 **`predefined_classes.txt`를 영구적으로 덮어쓴다**. 저장 후 라벨 히스토리·`w` 라벨 입력창·use-default-label 콤보박스를 즉시 갱신한다. 파일을 직접 편집하지 않고 앱 안에서 클래스를 관리할 수 있다. (메뉴 위치는 File, `labelImg.py:503`.)
 
-> **frozen(exe)에서의 클래스 파일**: 빌드된 실행파일에서는 항상 **실행파일 옆의 쓰기 가능한 `predefined_classes.txt`** 를 우선 사용한다(`get_persistent_classes_file`, `labelImg.py:2122-2140`). 이 영속 파일이 한 번 생기면 **CLI 두 번째 인자 `[PRE-DEFINED CLASS FILE]` 는 이후 무시**되고(최초 1회 시드로만 쓰임), 클래스 변경은 Edit Default Classes 또는 그 파일 직접 편집으로 한다. 소스(비 frozen)로 실행할 때는 CLI 인자가 그대로 적용된다.
+> **frozen(exe)에서의 클래스 파일**: 빌드된 실행파일에서는 항상 **실행파일 옆의 쓰기 가능한 `predefined_classes.txt`** 를 우선 사용한다(`get_persistent_classes_file`, `labelImg.py:2141-2159`). 이 영속 파일이 한 번 생기면 **CLI 두 번째 인자 `[PRE-DEFINED CLASS FILE]` 는 이후 무시**되고(최초 1회 시드로만 쓰임), 클래스 변경은 Edit Default Classes 또는 그 파일 직접 편집으로 한다. 소스(비 frozen)로 실행할 때는 CLI 인자가 그대로 적용된다.
 
 ## 고급 모드 (`Ctrl+Shift+A`)
 

@@ -19,7 +19,7 @@
 
 ### 클래스 목록이 안 뜨거나 이상하다
 
-클래스 목록은 설정 pkl이 아니라 `predefined_classes.txt`에서 읽는다(소스 실행: `data/predefined_classes.txt`, exe 실행: exe 옆 `predefined_classes.txt` — `get_persistent_classes_file`, `labelImg.py:2122`). pkl을 지우거나 `Reset All`을 해도 클래스는 바뀌지 않는다. 메뉴 `File → Edit Default Classes`(Ctrl+Shift+E)로 수정하거나 해당 txt 파일을 직접 편집하라(한 줄에 한 클래스).
+클래스 목록은 설정 pkl이 아니라 `predefined_classes.txt`에서 읽는다(소스 실행: `data/predefined_classes.txt`, exe 실행: exe 옆 `predefined_classes.txt` — `get_persistent_classes_file`, `labelImg.py:2141`). pkl을 지우거나 `Reset All`을 해도 클래스는 바뀌지 않는다. 메뉴 `File → Edit Default Classes`(Ctrl+Shift+E)로 수정하거나 해당 txt 파일을 직접 편집하라(한 줄에 한 클래스).
 
 ### 아이콘/문자열이 안 보이거나 import 에러
 

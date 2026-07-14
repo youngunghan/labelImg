@@ -1448,7 +1448,26 @@ class MainWindow(QMainWindow, WindowMixin):
         settings[SETTING_LABEL_FILE_FORMAT] = self.label_file_format
         # ML assist: the backend/model choice round-trips (there is no picker UI
         # yet, so it is config-file driven), the threshold is a live UI control.
-        settings[SETTING_MODEL_BACKEND] = self.assist.backend_name
+        # Persist SETTING_MODEL_BACKEND only when a backend was actually
+        # configured. self.assist.backend_name reflects the user's own
+        # choice (it stays e.g. 'yolo_onnx' even when that backend is
+        # currently unavailable -- see AssistController.__init__), so a
+        # falsy backend_name here means nothing was ever configured. Writing
+        # it unconditionally regardless is exactly what turned an implicit
+        # DEFAULT_BACKEND into a sticky, explicit setting in the first place
+        # (DEFAULT_BACKEND used to be 'stub'): every save/close would stamp
+        # whatever the constructor happened to fall back to straight into
+        # the pickle, so the very next launch read that stamped value back
+        # as if the user had chosen it. Any stale legacy key is dropped
+        # (not merely left unwritten) so the on-disk settings self-clean on
+        # the next save rather than carrying a misleading value forever --
+        # this cannot resurrect the bug because AssistController.__init__
+        # (libs/assist/controller.py) treats a persisted 'stub' as unset
+        # independently of what closeEvent does here.
+        if self.assist.backend_name:
+            settings[SETTING_MODEL_BACKEND] = self.assist.backend_name
+        else:
+            settings.data.pop(SETTING_MODEL_BACKEND, None)
         settings[SETTING_MODEL_PATH] = self.assist.model_path
         settings[SETTING_CONF_THRESHOLD] = self.assist.threshold
         settings.save()

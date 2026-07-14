@@ -79,6 +79,23 @@ BACKEND_UNAVAILABLE_HINT = (
     "pip install -e \".[ai]\" (this fork isn't on PyPI) and check that the "
     "configured model path is valid")
 
+# Before DEFAULT_BACKEND was fixed to None, it was 'stub'. Anyone who ran
+# labelImg during that window and closed it even once now has 'stub' sitting
+# in their settings pickle as an EXPLICIT SETTING_MODEL_BACKEND value -- the
+# old, unconditional closeEvent write (see labelImg.py MainWindow.closeEvent)
+# turned that implicit default into a sticky one. There is no settings-picker
+# UI (see NO_BACKEND_CONFIGURED_HINT above) and no doc ever tells a user to
+# set 'stub' by hand, so a persisted 'stub' can only be that old leak -- never
+# a deliberate opt-in -- and reading it back must not resurrect StubBackend's
+# fabricated (image-dimension-derived) detections. This is checked here, at
+# the single choke point every AssistController construction reads settings
+# through, so it holds no matter how many times the tainted pickle is loaded
+# and re-saved. `stub` remains fully usable when selected EXPLICITLY
+# in-process (AssistController.set_backend, or build_backend({'backend':
+# 'stub', ...}) directly, as the tests do) -- only this settings-read path
+# treats the persisted name as unset.
+_LEGACY_IMPLICIT_DEFAULT_BACKEND = 'stub'
+
 
 class AssistController(QObject):
 
@@ -88,7 +105,17 @@ class AssistController(QObject):
         self.service = service
 
         settings = app.settings
-        self.backend_name = settings.get(SETTING_MODEL_BACKEND, DEFAULT_BACKEND) or DEFAULT_BACKEND
+        raw_backend_name = settings.get(SETTING_MODEL_BACKEND, DEFAULT_BACKEND)
+        if raw_backend_name == _LEGACY_IMPLICIT_DEFAULT_BACKEND:
+            logger.info(
+                "Ignoring persisted %s=%r: this is the pre-fix implicit "
+                "default (DEFAULT_BACKEND used to be 'stub'), never a "
+                "deliberate choice -- there is no settings UI that writes "
+                "it. Treating it as unset instead of building StubBackend "
+                "and showing fabricated detections as if a real model ran.",
+                SETTING_MODEL_BACKEND, raw_backend_name)
+            raw_backend_name = None
+        self.backend_name = raw_backend_name or DEFAULT_BACKEND
         self.model_path = settings.get(SETTING_MODEL_PATH, None)
         self.threshold = self._sanitize_threshold(
             settings.get(SETTING_CONF_THRESHOLD, DEFAULT_CONF_THRESHOLD))

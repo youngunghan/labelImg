@@ -455,6 +455,141 @@ class TestBackendConfiguredButUnavailable(AssistTestCase):
                              'nothing being configured')
 
 
+class TestLegacyPersistedStubIsTreatedAsUnset(unittest.TestCase):
+    """REGRESSION: a settings pickle with SETTING_MODEL_BACKEND == 'stub' --
+    exactly what an earlier build of this branch (when DEFAULT_BACKEND was
+    still 'stub', before the fix in libs/inference/registry.py) would have
+    left behind the first time a user ran labelImg and closed it even once
+    -- must NOT build a StubBackend on the next launch. There is no
+    settings-picker UI and no doc ever tells a user to write 'stub' by hand
+    (see AssistController._LEGACY_IMPLICIT_DEFAULT_BACKEND), so a persisted
+    'stub' can only be that old implicit default leaking through; treating
+    it as a deliberate choice would keep resurrecting fabricated
+    (image-dimension-derived) detections for exactly the users the
+    DEFAULT_BACKEND=None fix was meant to protect.
+
+    Unmocked, like TestDefaultConstructionHasNoBackend: this drives the real
+    AssistController.__init__ -> build_backend -> registry path.
+    StubBackend itself needs no optional dependency, so nothing stops it
+    from actually being built here if the read-time guard regresses -- a
+    mocked build_backend could not tell that apart from the fix working."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = os.path.join(self.tmp.name, 'photos')
+        os.makedirs(self.dir)
+        img = QImage(IMAGE_SIZE, IMAGE_SIZE, QImage.Format_RGB32)
+        img.fill(0xffffffff)
+        img.save(os.path.join(self.dir, 'a.png'))
+
+        # Pre-seed the settings pickle exactly the way an earlier run of
+        # this branch would have left it: SETTING_MODEL_BACKEND == 'stub',
+        # written by the old unconditional closeEvent persist while
+        # DEFAULT_BACKEND was still 'stub' (mirrors
+        # TestBackendConfiguredButUnavailable's real-Settings().load() idiom
+        # above, rather than mocking backend_name directly).
+        settings_path = os.path.join(self.tmp.name, '.labelImgSettings.pkl')
+        with open(settings_path, 'wb') as handle:
+            pickle.dump({SETTING_MODEL_BACKEND: 'stub'}, handle,
+                       pickle.HIGHEST_PROTOCOL)
+
+        self.win = None
+        with mock.patch('os.path.expanduser', return_value=self.tmp.name):
+            self.app, self.win = get_main_app([sys.argv[0], self.dir])
+        self.win.settings.path = os.path.join(self.tmp.name, 'settings.pkl')
+        self.errors = []
+        self.win.error_message = lambda title, msg: self.errors.append((title, msg))
+
+    def tearDown(self):
+        self.win.dirty = False
+        self.win.close()
+        self.tmp.cleanup()
+
+    def test_persisted_stub_does_not_build_a_backend(self):
+        self.assertIsNone(self.win.assist.backend_name)
+        self.assertFalse(self.win.assist.is_available())
+        self.assertIsNone(self.win.inference_service.backend())
+
+    def test_persisted_stub_leaves_ai_actions_disabled_with_the_fresh_install_hint(self):
+        # Same hint as a genuinely fresh install (TestNoBackend), not the
+        # "configured but broken" one (TestBackendConfiguredButUnavailable)
+        # -- a treated-as-unset backend must read exactly like nothing was
+        # ever configured, not like a real backend that failed to build.
+        for action in self.win.assist_actions:
+            self.assertFalse(action.isEnabled(), action.text())
+            tooltip = action.toolTip()
+            self.assertIn('No model backend configured', tooltip)
+
+
+class TestUnconfiguredBackendIsNotPersistedOnClose(unittest.TestCase):
+    """REGRESSION: MainWindow.closeEvent used to write
+    ``settings[SETTING_MODEL_BACKEND] = self.assist.backend_name``
+    unconditionally on every save/close -- so a fresh install, whose
+    backend_name is None only because nothing was ever configured, still
+    got an explicit SETTING_MODEL_BACKEND entry written to the pickle on
+    every close. That unconditional write is exactly how DEFAULT_BACKEND
+    being 'stub' (before the fix in libs/inference/registry.py) turned into
+    a STICKY, explicit 'stub' setting the very first time anyone ran an
+    earlier build of this branch and closed it even once.
+
+    This drives the actual persist-on-close path (closeEvent, via the real
+    QWidget.close()) end to end -- launch a fresh install, close it, and
+    inspect what actually landed in the settings pickle -- rather than
+    asserting anything about closeEvent's behaviour from memory. Deliberately
+    does NOT override ``win.settings.path`` the way the other test cases in
+    this module do: the whole point here is the same file round-tripping
+    through load -> save -> load, exactly like a real user's
+    ``~/.labelImgSettings.pkl``."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = os.path.join(self.tmp.name, 'photos')
+        os.makedirs(self.dir)
+        img = QImage(IMAGE_SIZE, IMAGE_SIZE, QImage.Format_RGB32)
+        img.fill(0xffffffff)
+        img.save(os.path.join(self.dir, 'a.png'))
+        self.settings_path = os.path.join(self.tmp.name, '.labelImgSettings.pkl')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _launch(self):
+        with mock.patch('os.path.expanduser', return_value=self.tmp.name):
+            app, win = get_main_app([sys.argv[0], self.dir])
+        win.error_message = lambda title, msg: None
+        return app, win
+
+    def test_closing_a_fresh_install_does_not_write_a_backend_name(self):
+        app, win = self._launch()
+        self.assertIsNone(win.assist.backend_name)  # fresh-install precondition
+
+        win.dirty = False
+        win.close()  # runs closeEvent -- the actual persist-on-close path
+
+        self.assertTrue(os.path.isfile(self.settings_path),
+                        'closeEvent did not save a settings pickle at all')
+        with open(self.settings_path, 'rb') as handle:
+            saved = pickle.load(handle)
+        self.assertNotIn(SETTING_MODEL_BACKEND, saved,
+                         'closeEvent persisted a backend name nobody configured')
+
+    def test_relaunch_after_that_close_still_has_no_backend(self):
+        # The full round trip named in the regression: launch -> close ->
+        # relaunch must still come up with AI disabled, not resurrect a
+        # backend from whatever closeEvent just wrote to the pickle.
+        app, win = self._launch()
+        win.dirty = False
+        win.close()
+
+        app2, win2 = self._launch()
+        try:
+            self.assertIsNone(win2.assist.backend_name)
+            self.assertFalse(win2.assist.is_available())
+        finally:
+            win2.dirty = False
+            win2.close()
+
+
 class TestNoStaleUpstreamPyPIInstruction(unittest.TestCase):
     """Regression guard: this fork is not published to PyPI, so the bare
     upstream form of the install command (the exact string in
