@@ -27,6 +27,21 @@ from libs.shape import Shape
 IMAGE_SIZE = 64
 
 
+def _importable(module_name):
+    try:
+        __import__(module_name)
+    except ImportError:
+        return False
+    return True
+
+
+# numpy ships with the [ai] extra, not with the base install -- and the core CI
+# job installs pyqt5+lxml ONLY. A test that asserts the numpy carrier therefore
+# has to say so, or it fails on exactly the install this package promises to keep
+# working. (The no-numpy half of the contract is covered below, unguarded.)
+HAS_NUMPY = _importable('numpy')
+
+
 class CountingStub(StubBackend):
     """StubBackend that records how often the model was actually run.
 
@@ -568,6 +583,7 @@ class TestImageCarrier(unittest.TestCase):
         image.fill(0xffff0000)  # opaque red
         return image
 
+    @unittest.skipUnless(HAS_NUMPY, 'needs numpy (pip install labelImg[ai])')
     def test_numpy_path_yields_an_hwc_array(self):
         array = to_model_image(self.make_image(65, 33))  # odd width => padded rows
 

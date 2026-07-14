@@ -32,8 +32,7 @@ from libs.inference.backend import MissingDependency, ModelBackend
 from libs.inference.registry import available_backends, build_backend
 from libs.inference.types import Detection
 from libs.inference.yolo_onnx import (DEFAULT_IOU_THRESHOLD, LAYOUT_V5,
-                                      LAYOUT_V8, MIN_CONF_THRESHOLD,
-                                      YoloOnnxBackend, class_name,
+                                      LAYOUT_V8, YoloOnnxBackend, class_name,
                                       decode_output, detect_layout,
                                       generic_class_names, inverse_letterbox,
                                       letterbox_params, load_classes_txt, nms,
@@ -146,14 +145,45 @@ class TestLetterboxParams(unittest.TestCase):
                 new_h = round(orig[1] * scale)
                 self.assertGreaterEqual(pad_x, 0.0)
                 self.assertGreaterEqual(pad_y, 0.0)
-                # Centred: the two pads plus the scaled image fill the canvas.
-                self.assertAlmostEqual(model[0], new_w + 2 * pad_x, delta=EPS)
-                self.assertAlmostEqual(model[1], new_h + 2 * pad_y, delta=EPS)
+                # Centred to the nearest whole pixel: the image plus its two pads
+                # fill the canvas, give or take the one row/column an odd leftover
+                # cannot split (it goes to the bottom/right).
+                self.assertIn(model[0] - (new_w + 2 * pad_x), (0.0, 1.0))
+                self.assertIn(model[1] - (new_h + 2 * pad_y), (0.0, 1.0))
                 # The scaled image fits, and touches at least one edge.
                 self.assertLessEqual(new_w, model[0])
                 self.assertLessEqual(new_h, model[1])
                 self.assertTrue(pad_x < 1.0 or pad_y < 1.0,
                                 'both axes padded: the scale is not maximal')
+
+    def test_an_odd_leftover_still_pads_by_a_whole_pixel(self):
+        """Regression: a pad of 1.5 is a pad the preprocessing cannot honour.
+
+        1000x995 into 640x640 scales by 0.64 to 640x637, leaving 3 rows -- an
+        ideal top pad of 1.5.  But the resized image is pasted into an ARRAY, and
+        there is no row 1.5, so the pad the inverse subtracts has to be the whole
+        number the paste actually used.  When this returned 1.5 the canvas pasted
+        at row 2 (``round(1.5) == 2``) and every box on the image came back
+        0.5/scale == 0.78px too low.
+        """
+        scale, pad_x, pad_y = letterbox_params(1000, 995, 640, 640)
+        self.assertAlmostEqual(0.64, scale, delta=EPS)
+        self.assertEqual(0.0, pad_x)
+        self.assertEqual(1.0, pad_y, 'a 1.5px pad must floor to a real row, not stay fractional')
+
+    def test_the_pads_are_always_whole_pixels(self):
+        # The same invariant over a spread of sizes chosen to hit both odd and
+        # even leftovers on either axis.
+        for orig in ((1000, 995), (995, 1000), (1000, 993), (65, 33), (37, 2000),
+                     (1280, 720), (500, 500), (1, 1), (3, 4000)):
+            for model in ((640, 640), (320, 320), (416, 416), (640, 384)):
+                _scale, pad_x, pad_y = letterbox_params(orig[0], orig[1], model[0], model[1])
+                self.assertEqual(pad_x, int(pad_x),
+                                 'pad_x %r for %r -> %r is not a whole pixel'
+                                 % (pad_x, orig, model))
+                self.assertEqual(pad_y, int(pad_y),
+                                 'pad_y %r for %r -> %r is not a whole pixel'
+                                 % (pad_y, orig, model))
 
     def test_degenerate_sizes_are_rejected(self):
         with self.assertRaises(ValueError):
@@ -764,6 +794,69 @@ class TestPredictWithFakeSession(unittest.TestCase):
         self.assertAlmostEqual(1.0, float(tensor[0, 0, 140, 0]), delta=1e-3)
         self.assertAlmostEqual(114.0 / 255.0, float(tensor[0, 0, 139, 0]), delta=1e-3)
 
+    def content_rect(self, tensor):
+        """Where the image REALLY landed in the canvas, read off the tensor itself.
+
+        Deliberately NOT computed from letterbox_params: a test that asks the
+        module where it put the image and then checks the module inverted its own
+        answer proves only that it is self-consistent, which is exactly the blind
+        spot that let a half-pixel paste bias ship.  The image is white and the
+        pad is grey 114, so the canvas is the witness.  Returns (x1, y1, x2, y2)
+        in model pixels, half-open -- the same convention as a decoded box.
+        """
+        import numpy as np
+        plane = tensor[0, 0]
+        content = plane > (200.0 / 255.0)
+        rows = np.where(content.any(axis=1))[0]
+        cols = np.where(content.any(axis=0))[0]
+        return (float(cols[0]), float(rows[0]),
+                float(cols[-1] + 1), float(rows[-1] + 1))
+
+    def test_the_paste_offset_is_exactly_the_pad_the_inverse_subtracts(self):
+        # Regression. THE letterbox contract, stated where it can actually break:
+        # between the numpy paste and the pure-Python pad. 1000x995 -> 640x640
+        # leaves 3 rows (an ideal pad of 1.5); the paste rounded that to row 2
+        # while the inverse went on subtracting 1.5.
+        for orig in ((1000, 995), (995, 1000), (1000, 993), (1280, 720), (65, 33)):
+            session = self.FakeSession(self.scene_tensor())
+            self.build(session=session).predict(self.image(orig[0], orig[1], value=255))
+            x1, y1, _x2, _y2 = self.content_rect(session.feeds[0]['images'])
+            _scale, pad_x, pad_y = letterbox_params(orig[0], orig[1], 640, 640)
+            self.assertEqual(
+                (pad_x, pad_y), (x1, y1),
+                'image %r is pasted at %r but the inverse subtracts %r'
+                % (orig, (x1, y1), (pad_x, pad_y)))
+
+    def test_an_odd_pad_maps_the_pasted_image_back_onto_the_whole_image(self):
+        """The same bug end to end: real resize, real paste, real inverse.
+
+        The pure-Python round-trip tests cannot catch this -- they invert
+        letterbox_params with letterbox_params, and every other predict() test
+        happens to use an image whose padding comes out even.  Only the numpy
+        paste knows which row the image really starts on.  So: read the pasted
+        rect off the tensor, hand the model an anchor that is exactly that rect,
+        and demand the whole original image back.  With the fractional pad the top
+        edge came back at y=0.78 instead of 0.
+        """
+        orig_w, orig_h = 1000, 995   # -> scale 0.64, 637 rows of image, 3 of pad
+        probe = self.FakeSession(self.scene_tensor())
+        self.build(session=probe).predict(self.image(orig_w, orig_h, value=255))
+        x1, y1, x2, y2 = self.content_rect(probe.feeds[0]['images'])
+
+        session = self.FakeSession(v8_tensor({
+            0: ((x1 + x2) / 2.0, (y1 + y2) / 2.0, x2 - x1, y2 - y1, (0.9, 0.0)),
+        }, 2, 20))
+        backend = self.build(session=session, class_names=SCENE_CLASSES)
+        detections = backend.predict(self.image(orig_w, orig_h, value=255))
+
+        self.assertEqual(1, len(detections))
+        for expected, actual in zip((0.0, 0.0, float(orig_w), float(orig_h)),
+                                    detections[0].box):
+            self.assertAlmostEqual(
+                expected, actual, delta=1e-3,
+                msg='the pasted rect %r must invert to the whole image, got %r'
+                    % ((x1, y1, x2, y2), detections[0].box))
+
     def test_the_session_is_reused_across_images(self):
         session = self.FakeSession(self.scene_tensor())
         backend = self.build(session=session)
@@ -785,6 +878,30 @@ class TestPredictWithFakeSession(unittest.TestCase):
         backend = self.build(session=self.FakeSession(self.scene_tensor(), dynamic),
                              input_size=320)
         self.assertEqual((320, 320), (backend.input_width, backend.input_height))
+
+    def test_a_static_model_shape_wins_over_a_conflicting_config_input_size(self):
+        """Regression: the model's own static shape must outrank config input_size.
+
+        Precedence used to be backwards -- an explicit config `input_size` was
+        consulted BEFORE the model's own declared shape, so a fixed-shape export
+        (e.g. (1, 3, 640, 640)) fed a config of `input_size=320` would letterbox
+        into a 320x320 canvas and then feed that tensor to a session that can
+        only run at 640x640: every single session.run() failed. The model's
+        shape must win, with a warning, and the fed tensor must match it.
+        """
+        session = self.FakeSession(self.scene_tensor(), input_shape=(1, 3, 640, 640))
+        with self.assertLogs('libs.inference.yolo_onnx', level='WARNING') as logs:
+            backend = self.build(session=session, input_size=320)
+        self.assertTrue(any('conflicts' in message for message in logs.output))
+
+        # The resolved size is the model's, not the conflicting config value.
+        self.assertEqual((640, 640), (backend.input_width, backend.input_height))
+
+        # And predict() actually feeds the session a tensor of the shape the
+        # model demands -- proving this is not just a reported attribute but the
+        # shape session.run() is actually driven with.
+        backend.predict(self.image(1280, 720))
+        self.assertEqual((1, 3, 640, 640), tuple(session.feeds[0]['images'].shape))
 
     def test_class_names_come_from_the_model_metadata_first(self):
         session = self.FakeSession(self.scene_tensor(),
@@ -830,12 +947,31 @@ class TestPredictWithFakeSession(unittest.TestCase):
         backend = self.build(session=session, class_names=['kitten', 'puppy'])
         self.assertEqual(['kitten', 'puppy'], backend.class_names)
 
-    def test_the_confidence_threshold_has_a_floor(self):
-        # The app asks for 0.0 (it re-filters in the UI), but a real detector
-        # emits thousands of near-zero anchors; taking 0.0 literally would feed
-        # all of them to a pure-Python NMS and bury the canvas.
-        self.assertEqual(MIN_CONF_THRESHOLD, self.build(conf_threshold=0.0).conf_threshold)
+    def test_the_confidence_threshold_is_never_floored(self):
+        # AssistController._build_backend documents and relies on the backend
+        # NOT pre-filtering: it always asks for conf_threshold=0.0 so the UI
+        # slider can re-filter already-decoded results without a second
+        # inference run. A backend that quietly floors 0.0 up to some epsilon
+        # breaks that contract silently -- the low end of the slider would just
+        # stop doing anything. MAX_NMS_CANDIDATES is the only guard against
+        # candidate-count blowup; there must be no separate confidence floor.
+        self.assertEqual(0.0, self.build(conf_threshold=0.0).conf_threshold)
         self.assertEqual(0.6, self.build(conf_threshold=0.6).conf_threshold)
+
+    def test_a_sub_5_percent_detection_survives_a_sub_5_percent_threshold(self):
+        # Regression: with the old MIN_CONF_THRESHOLD=0.05 floor, a backend
+        # asked to keep everything down to 1% (conf_threshold=0.01, below the
+        # old floor) silently had its threshold raised to 0.05, so a real
+        # 2%-score anchor was dropped inside the backend where no UI slider
+        # position could ever bring it back. 0.01 (not 0.0) isolates the floor
+        # from the "unfired anchors score exactly 0.0" edge case.
+        session = self.FakeSession(v8_tensor({0: (100, 200, 40, 60, (0.02, 0.0))}, 2, 20))
+        backend = self.build(session=session, conf_threshold=0.01, class_names=SCENE_CLASSES)
+        self.assertEqual(0.01, backend.conf_threshold)
+        detections = backend.predict(self.image(*SCENE_IMAGE))
+        self.assertEqual(1, len(detections),
+                         'a sub-5%% detection must survive a sub-5%% threshold')
+        self.assertAlmostEqual(0.02, detections[0].score, delta=EPS)
 
     def test_a_raw_image_carrier_reports_a_missing_dependency(self):
         class RawImageLike(object):  # libs.inference.service.RawImage

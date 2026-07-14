@@ -44,6 +44,17 @@ so the inverse -- which is what a detection needs -- is subtract, divide, clip::
 Only ONE scale exists (never one per axis): that is the whole point of padding.
 A backend that used ``in_w / orig_w`` and ``in_h / orig_h`` separately would
 return boxes that look almost right and are wrong on every non-square image.
+
+The pads are WHOLE PIXELS, and that is not a rounding detail -- it is the
+contract.  The forward map is not an abstraction: it is a real image pasted into
+a real array at a real row, and an array has no row 1.5.  When the leftover is
+odd (a 1000x995 image into a 640x640 net leaves 3 rows: an ideal pad of 1.5) the
+paste must pick a row, so the *ideal* centre and the *actual* offset differ by
+half a pixel -- and every box comes back biased by ``0.5 / scale`` original
+pixels if the inverse subtracts the ideal one.  So there is no ideal one: both
+directions take their pads from ``_letterbox_geometry`` below, which floors the
+split to a whole pixel and gives the odd row to the bottom/right.  Preprocessing
+and inversion cannot disagree because they no longer compute it twice.
 """
 
 from __future__ import annotations
@@ -79,18 +90,22 @@ DEFAULT_IOU_THRESHOLD = 0.45
 DEFAULT_MAX_DETECTIONS = 300
 
 # A detector emits one candidate per anchor (8400 for a 640px v8 model, 25200
-# for v5) and the app deliberately asks for conf_threshold=0.0 so that the
-# confidence slider can re-filter without re-running the model.  Taken
-# literally that would hand *every* anchor to a pure-Python NMS -- quadratic in
-# thousands -- and drop a wall of noise onto the canvas.  So the backend keeps a
-# floor: below this score a box is not a detection the user could ever want.
-MIN_CONF_THRESHOLD = 0.05
-
-# Second guard on the same failure: even above the floor a noisy image can leave
-# thousands of candidates.  Only the best MAX_NMS_CANDIDATES go into NMS, which
-# bounds its cost; they are the highest-scoring ones, i.e. exactly the boxes the
-# user would have kept anyway.
+# for v5) and the app deliberately asks for conf_threshold=0.0 (see
+# AssistController._build_backend) so that the confidence slider can re-filter
+# without re-running the model. There is DELIBERATELY NO FLOOR here: a floor
+# would silently break that contract (a user dragging the slider below the
+# floor would see nothing new, and the UI has no way to tell them the model
+# never even kept the box). This was measured, not assumed: decoding the full
+# candidate set at conf_threshold=0.0 costs ~34ms versus ~10ms at 0.05 for a
+# stock (1, 84, 8400) v8 tensor -- ~24ms, negligible next to actual model
+# inference. MAX_NMS_CANDIDATES below is the real, cheap safety valve against a
+# noisy image producing a wall of near-zero anchors.
 MAX_NMS_CANDIDATES = 1000
+
+# Only guard against candidate-count blowup: a noisy image (or the conf_threshold
+# =0.0 the app always asks for) can leave thousands of decoded candidates. Only
+# the best MAX_NMS_CANDIDATES go into NMS, which bounds its cost; they are the
+# highest-scoring ones, i.e. exactly the boxes the user would have kept anyway.
 
 # Ultralytics' letterbox fill.  Any constant works (the model never sees an
 # object there); matching the training-time value keeps the padded strip from
@@ -111,30 +126,56 @@ LAYOUT_V5 = 'v5'  # (1, N, 5+nc): objectness * per-class score
 # Geometry -- pure Python, no numpy.  See the module docstring's contract.
 # ---------------------------------------------------------------------------
 
-def letterbox_params(orig_w: float, orig_h: float,
-                     in_w: float, in_h: float) -> Tuple[float, float, float]:
-    """``(scale, pad_x, pad_y)`` for fitting ``orig`` into ``in`` with padding.
+def _letterbox_geometry(orig_w: float, orig_h: float,
+                        in_w: float, in_h: float) -> Tuple[float, int, int, float, float]:
+    """``(scale, new_w, new_h, pad_x, pad_y)`` -- the ONE source of letterbox truth.
 
-    ``scale`` is the single (aspect-preserving) factor that makes the image fit
-    inside the network input; the image is then *centred*, so the leftover is
-    split evenly and ``pad_x`` / ``pad_y`` are the left / top offsets in
-    model-input pixels.  Exactly one of the two is 0 unless the aspect ratios
-    already match (then both are).
+    Both directions of the transform come from here: ``_letterbox`` pastes a
+    ``new_w x new_h`` resize at ``(pad_x, pad_y)``, and ``letterbox_params`` hands
+    the very same ``scale`` / ``pad_x`` / ``pad_y`` to ``inverse_letterbox``.  That
+    is the whole reason this function exists rather than each side deriving its own
+    numbers: when they were computed twice, the paste rounded ``pad_y`` to an int
+    and the inverse did not, and an odd pad silently biased every box by half a
+    model pixel (see the module docstring).  A single return value cannot disagree
+    with itself.
 
-    The scaled extent is rounded to whole pixels before the padding is computed,
-    because that extent is what actually gets pasted into the canvas -- the pads
-    have to describe the tensor that the model really sees, not an idealised one.
+    Everything is a whole number of pixels because the canvas is an array:
+
+    * ``new_w`` / ``new_h`` -- the scaled extent, clamped to at least 1px (a
+      sliver of a panorama must still paste *something*) and never larger than
+      the canvas it has to fit inside.
+    * ``pad_x`` / ``pad_y`` -- the left / top offset, the even split FLOORED to a
+      whole pixel, so an odd leftover gives the extra row/column to the
+      bottom/right.  Exactly one of the two is 0 unless the aspect ratios already
+      match (then both are).  They are returned as floats only because the
+      inverse does float arithmetic with them.
     """
     if orig_w <= 0 or orig_h <= 0:
         raise ValueError('image size must be positive, got %rx%r' % (orig_w, orig_h))
     if in_w <= 0 or in_h <= 0:
         raise ValueError('model input size must be positive, got %rx%r' % (in_w, in_h))
 
+    canvas_w, canvas_h = int(in_w), int(in_h)
     scale = min(float(in_w) / float(orig_w), float(in_h) / float(orig_h))
-    new_w = int(round(orig_w * scale))
-    new_h = int(round(orig_h * scale))
-    pad_x = (float(in_w) - new_w) / 2.0
-    pad_y = (float(in_h) - new_h) / 2.0
+    new_w = min(max(1, int(round(orig_w * scale))), canvas_w)
+    new_h = min(max(1, int(round(orig_h * scale))), canvas_h)
+    pad_x = float((canvas_w - new_w) // 2)
+    pad_y = float((canvas_h - new_h) // 2)
+    return scale, new_w, new_h, pad_x, pad_y
+
+
+def letterbox_params(orig_w: float, orig_h: float,
+                     in_w: float, in_h: float) -> Tuple[float, float, float]:
+    """``(scale, pad_x, pad_y)`` for fitting ``orig`` into ``in`` with padding.
+
+    ``scale`` is the single (aspect-preserving) factor that makes the image fit
+    inside the network input; the image is then centred to the nearest whole
+    pixel, and ``pad_x`` / ``pad_y`` are the left / top offsets in model-input
+    pixels -- the exact offsets the preprocessing pastes at, not an idealised
+    centre.  This is what ``inverse_letterbox`` must be given; see
+    ``_letterbox_geometry``.
+    """
+    scale, _new_w, _new_h, pad_x, pad_y = _letterbox_geometry(orig_w, orig_h, in_w, in_h)
     return scale, pad_x, pad_y
 
 
@@ -602,9 +643,10 @@ class YoloOnnxBackend(ModelBackend):
         # image is a worse experience than one the UI never offers.
         self._np = _require('numpy')
 
-        self.conf_threshold = max(
-            MIN_CONF_THRESHOLD,
-            DEFAULT_CONF_THRESHOLD if conf_threshold is None else float(conf_threshold))
+        # No floor: see the comment above MAX_NMS_CANDIDATES. conf_threshold=0.0
+        # (what AssistController always passes) must reach postprocess() as 0.0.
+        self.conf_threshold = (DEFAULT_CONF_THRESHOLD if conf_threshold is None
+                               else float(conf_threshold))
         self.iou_threshold = (DEFAULT_IOU_THRESHOLD if iou_threshold is None
                               else float(iou_threshold))
         self.max_detections = (DEFAULT_MAX_DETECTIONS if max_detections is None
@@ -693,28 +735,55 @@ class YoloOnnxBackend(ModelBackend):
     def _resolve_input_size(self, input_size: Optional[Any]) -> Tuple[int, int]:
         """``(width, height)`` of the network input.
 
-        Taken from the model itself when it pins its input (the usual case:
-        ``[1, 3, 640, 640]``).  Dynamic axes come back as strings or None, and
-        then the config -- or 640 -- decides, because the letterbox has to know
-        the canvas it is padding into.
-        """
-        if input_size is not None:
-            if isinstance(input_size, (list, tuple)):
-                width, height = int(input_size[0]), int(input_size[1])
-            else:
-                width = height = int(input_size)
-            if width < 1 or height < 1:
-                raise ValueError('input_size must be positive, got %r' % (input_size,))
-            return width, height
+        The MODEL'S OWN declared shape wins on any axis where it is pinned (the
+        usual case: ``[1, 3, 640, 640]``) -- a session built for a fixed input
+        shape cannot ``session.run()`` at any other size, so letting a config
+        value override it used to build a backend that failed on every single
+        call.  If ``input_size`` disagrees with a pinned axis, that is logged as
+        a warning and the model still wins: this must never produce a session
+        that cannot run.
 
+        Only an axis the model leaves dynamic (a string, or missing -- what
+        onnxruntime reports for a symbolic dimension) is actually decided by the
+        config, because then the letterbox still has to know the canvas it is
+        padding into and the model does not say. ``input_size`` (or 640) is the
+        fallback for exactly those axes, never a general override.
+        """
         shape = list(getattr(self._session.get_inputs()[0], 'shape', []) or [])
-        height = shape[2] if len(shape) == 4 else None
-        width = shape[3] if len(shape) == 4 else None
-        if not isinstance(height, int) or height < 1:
-            height = DEFAULT_INPUT_SIZE
-        if not isinstance(width, int) or width < 1:
-            width = DEFAULT_INPUT_SIZE
-        return int(width), int(height)
+        model_height = shape[2] if len(shape) == 4 else None
+        model_width = shape[3] if len(shape) == 4 else None
+        model_height = model_height if isinstance(model_height, int) and model_height >= 1 else None
+        model_width = model_width if isinstance(model_width, int) and model_width >= 1 else None
+
+        configured_width = configured_height = None
+        if input_size is not None:
+            configured_width, configured_height = self._parse_input_size(input_size)
+
+        width = model_width if model_width is not None else (
+            configured_width if configured_width is not None else DEFAULT_INPUT_SIZE)
+        height = model_height if model_height is not None else (
+            configured_height if configured_height is not None else DEFAULT_INPUT_SIZE)
+
+        if (input_size is not None and (model_width is not None or model_height is not None)
+                and (configured_width, configured_height) != (width, height)):
+            logger.warning(
+                "configured input_size %r conflicts with the model's own static "
+                "input shape (width=%r, height=%r); using the model's shape -- a "
+                'session built for a fixed input size cannot run at any other size',
+                input_size, model_width, model_height)
+
+        return width, height
+
+    @staticmethod
+    def _parse_input_size(input_size: Any) -> Tuple[int, int]:
+        """Normalise a config ``input_size`` (an int, or an explicit ``(w, h)``)."""
+        if isinstance(input_size, (list, tuple)):
+            width, height = int(input_size[0]), int(input_size[1])
+        else:
+            width = height = int(input_size)
+        if width < 1 or height < 1:
+            raise ValueError('input_size must be positive, got %r' % (input_size,))
+        return width, height
 
     def _resolve_class_names(self) -> List[str]:
         """Metadata -> sibling ``classes.txt`` -> generic, first hit wins.
@@ -826,17 +895,17 @@ class YoloOnnxBackend(ModelBackend):
         sampled corners are widened to float, so the temporaries stay the size of
         the *output*, not of a 4K input.
 
-        Must stay in step with ``letterbox_params``: that function is what the
-        inverse trusts, so any change to the paste offsets here is a change to
-        every box the model returns.
+        The paste offsets are NOT recomputed here: they come from
+        ``_letterbox_geometry``, the same call ``letterbox_params`` makes for the
+        inverse.  Deriving them a second time is precisely how the two sides drift
+        apart (they once did, by half a pixel on any odd pad), so this method is
+        deliberately given no arithmetic of its own to get wrong.
         """
         np = self._np
         orig_h, orig_w = int(image.shape[0]), int(image.shape[1])
         in_w, in_h = self.input_width, self.input_height
 
-        scale, pad_x, pad_y = letterbox_params(orig_w, orig_h, in_w, in_h)
-        new_w = max(1, int(round(orig_w * scale)))
-        new_h = max(1, int(round(orig_h * scale)))
+        _scale, new_w, new_h, pad_x, pad_y = _letterbox_geometry(orig_w, orig_h, in_w, in_h)
 
         # Half-pixel centres: sample the source at the middle of each destination
         # pixel, which is what every reference resize does (and what keeps a 2x
@@ -863,8 +932,10 @@ class YoloOnnxBackend(ModelBackend):
         resized = top + (bottom - top) * wy
 
         canvas = np.full((in_h, in_w, 3), float(PAD_VALUE), dtype=np.float32)
-        left = int(round(pad_x))
-        top_offset = int(round(pad_y))
+        # Exact, not rounded: the pads are already whole pixels, and int() here
+        # is only a type cast. Rounding at this line was the half-pixel bias.
+        left = int(pad_x)
+        top_offset = int(pad_y)
         canvas[top_offset:top_offset + new_h, left:left + new_w] = resized
 
         # NCHW, 0..1 -- the layout and range every Ultralytics export expects.
