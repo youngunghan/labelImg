@@ -69,6 +69,14 @@ A citation's symbol is extracted with two mechanisms, tried in order:
    mechanism correctly does not extract a symbol there, and the citation
    falls back to the range-only check.
 
+Both mechanisms accept a DOTTED backtick token, e.g.
+`` `AssistController._is_current`(`libs/assist/controller.py:363-372`) `` --
+only the trailing component (``_is_current``) is captured and used as the
+candidate symbol; the leading ``AssistController.`` qualifier is matched but
+discarded (a bare method name is normally unique enough within one file, and
+the "defined anywhere in the file" gate below still guards against a
+coincidental match on an unrelated word).
+
 A candidate symbol is then only trusted if it is actually defined
 (``def``/``class``/assignment) SOMEWHERE in the resolved file at all -- this
 catches the other class of false positive, e.g.
@@ -113,16 +121,44 @@ how the fork itself defines "line count" elsewhere in that doc).
 
 NON-VACUOUSNESS
 ----------------
-As of this writing, this lint extracts and range-checks 788 citation groups
-across the whole doc surface, 248 of which also get a real symbol-location
-check (computed by walking the extractor over every doc file -- not a guess;
-see ``test_citation_extraction_is_non_vacuous``, which asserts a lower bound
-on both and prints the live counts when run with ``-v``). This was confirmed
-non-vacuous directly: a throwaway line inserted near the top of
-``libs/assist/controller.py`` (shifting every later line down by one) made
-this suite fail immediately, naming the drifted citations by doc file:line,
-raw citation text, and the actual current file content -- then the insertion
-was reverted and the file diffed back to byte-identical.
+As of this writing, this lint extracts and range-checks 789 citation groups
+across the whole doc surface, 280 of which also get a real symbol-location
+check (computed by walking the extractor over every doc file -- not a guess).
+``test_citation_extraction_is_non_vacuous`` asserts a lower bound on the
+789 figure and prints it when run with ``-v``; ``TestDocCitationSymbolsMatch
+.test_symbol_is_reachable_at_its_cited_location`` separately asserts a lower
+bound on the 280 figure and prints IT when run with ``-v`` (two different
+test methods, each printing its own count -- not one method printing both).
+
+This was verified empirically, twice, with different-sized mutations of
+``libs/assist/controller.py`` (each reverted afterwards and diffed back to
+byte-identical against a pre-edit copy):
+
+* **A single throwaway line** near the top (shifting every later line down by
+  one) reliably trips exactly one assertion:
+  ``TestModulesLineCounts.test_line_count_claims_match_reality`` (the
+  ``libs/assist/controller.py`` line count in modules.md goes stale by
+  exactly 1, e.g. ``542`` claimed vs ``543`` actual). It does NOT trip
+  ``test_symbol_is_reachable_at_its_cited_location``: that check's tolerance
+  (``_symbol_defined_near``'s ``slack=2`` window, and ``_symbol_body_contains``
+  falling back to a symbol's current -- already-shifted-by-one -- body span)
+  absorbs a 1-line drift for essentially every symbol citation in this repo's
+  docs. A single line is simply too small a perturbation for the symbol-level
+  checks to notice; the line-count check is what actually catches it, and it
+  does so reliably.
+* **A 6-line insertion** in the same spot additionally trips
+  ``test_symbol_is_reachable_at_its_cited_location`` outright, with 14 named
+  failures, each showing the doc file:line, the raw citation text, the
+  expected symbol, and the actual current content at the (now-wrong) cited
+  location -- e.g. ``docs/reference/modules.md:108: citation '`:454`' claims
+  `accept_all` is defined in/reachable from ... at 454, but it is not``.
+
+Both experiments are genuine evidence of non-vacuousness (the suite is not
+merely "always green" against small tampering), but they catch drift through
+different assertions at different magnitudes: line-count claims are exact and
+therefore maximally sensitive (any drift at all is wrong by definition),
+while the symbol/range checks carry deliberate slack for legitimate citation
+styles (see above) and so need a larger, multi-line drift to trip reliably.
 """
 
 import glob
@@ -139,6 +175,14 @@ FILE_TOKEN = r'[A-Za-z0-9_][A-Za-z0-9_./\\-]*\.py'
 NUM_LIST = r'\d+(?:-\d+)?(?:\s*,\s*\d+(?:-\d+)?)*'
 IDENT = r'[A-Za-z_][A-Za-z0-9_]*'
 
+# A backtick-quoted symbol may be dotted, e.g. `` `AssistController._is_current` ``
+# -- only the LAST component (the method/attribute name) is captured and used
+# for verification; the class-name prefix is accepted but discarded (a bare
+# method name is normally unique enough within one file, and the "defined
+# anywhere in the file" gate in TestDocCitationSymbolsMatch still guards
+# against a coincidental false match on some unrelated word).
+DOTTED_TAIL = r'(?:%s\.)*(%s)' % (IDENT, IDENT)
+
 # "libs/assist/controller.py:454-473" or "controller.py:57, 177-180" -- with
 # or without a colon+number list (a bare file mention with no citation still
 # has to update the "current file" context for later bare citations).
@@ -150,9 +194,10 @@ FULL_RE = re.compile(r'(?P<file>%s)(?:\s*:\s*(?P<nums>%s))?' % (FILE_TOKEN, NUM_
 # to keep this from matching incidental "12:30"-shaped text elsewhere.
 BARE_RE = re.compile(r'[`(]\s*:\s*(?P<nums>%s)\s*[`)]' % NUM_LIST)
 
-# One backtick-quoted identifier, optionally with a trailing "()" marking it
-# as a function/method (stripped -- the () is not part of the Python name).
-SYMBOL_TOKEN_RE = re.compile(r'`(%s)(?:\(\))?`' % IDENT)
+# One backtick-quoted identifier (optionally dotted, see DOTTED_TAIL above),
+# optionally with a trailing "()" marking it as a function/method (stripped --
+# the () is not part of the Python name).
+SYMBOL_TOKEN_RE = re.compile(r'`%s(?:\(\))?`' % DOTTED_TAIL)
 
 # 2+ symbols followed (optionally after whitespace, e.g. "`A`/`B` (`:10`/`:30`)")
 # by "(...)" with no nested parens -- candidate for positional list pairing
@@ -160,9 +205,11 @@ SYMBOL_TOKEN_RE = re.compile(r'`(%s)(?:\(\))?`' % IDENT)
 SYMBOL_GROUP_RE = re.compile(
     r'((?:`%s(?:\(\))?`(?:\s*/\s*)?){2,})\s*\(([^()]*)\)' % IDENT)
 
-# Tight adjacency: a single backtick-symbol immediately before a citation,
-# separated only by punctuation actually used in this repo's docs (no prose).
-TIGHT_PRECEDING_RE = re.compile(r'`(%s)(?:\(\))?`[\s,/(`]*$' % IDENT)
+# Tight adjacency: a single backtick-symbol (optionally dotted, e.g.
+# `` `AssistController._is_current` `` -- only the trailing method/attribute
+# name is captured, see DOTTED_TAIL) immediately before a citation, separated
+# only by punctuation actually used in this repo's docs (no prose).
+TIGHT_PRECEDING_RE = re.compile(r'`%s(?:\(\))?`[\s,/(`]*$' % DOTTED_TAIL)
 
 # docs/reference/modules.md "(NNN줄)" line-count claims, always right after a
 # `path.py` mention.
