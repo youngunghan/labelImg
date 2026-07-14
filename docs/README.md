@@ -1,6 +1,6 @@
 # labelImg — 개발자 문서
 
-**labelImg**(1.8.6)는 Python + Qt(PyQt5)로 만든 그래픽 이미지 바운딩박스 주석 도구다. 이미지 위에 사각형(bounding box)을 그려 객체에 라벨을 붙이고, 그 결과를 **PASCAL VOC XML · YOLO txt · CreateML JSON** 세 포맷으로 저장한다. 원래 ImageNet 작업용으로 만들어졌고 객체 검출 학습 데이터 라벨링에 널리 쓰인다.
+**labelImg**(1.8.6)는 Python + Qt(PyQt5)로 만든 그래픽 이미지 바운딩박스 주석 도구다. 이미지 위에 사각형(bounding box)을 그려 객체에 라벨을 붙이고, 그 결과를 **PASCAL VOC XML · YOLO txt · CreateML JSON · COCO JSON** 네 포맷으로 저장한다. 원래 ImageNet 작업용으로 만들어졌고 객체 검출 학습 데이터 라벨링에 널리 쓰인다. (COCO는 이미지별 사이드카가 아니라 **데이터셋 레인**이다 — [explanation/ml-assist-architecture.md](explanation/ml-assist-architecture.md) §리스크 7.)
 
 이 폴더는 labelImg를 **이해·확장·디버깅**하려는 개발자용 문서다. 사용자 빠른 시작과 핫키 요약은 프로젝트 루트 [../README.rst](../README.rst) 에도 있다. 에이전트(LLM)용 라우팅 지도는 [llms.txt](llms.txt).
 
@@ -45,7 +45,7 @@
 | [explanation/architecture.md](explanation/architecture.md) | 컴포넌트 구성, MainWindow ↔ Canvas ↔ Shape ↔ I/O, Qt 시그널/슬롯 |
 | [explanation/annotation-formats.md](explanation/annotation-formats.md) | 3 포맷 설계, 포맷 전환, reader/writer 대칭, difficult/verified 의미 |
 | [explanation/canvas-interaction-model.md](explanation/canvas-interaction-model.md) | CREATE/EDIT 모드, 마우스·정점·도형 이동, 정사각형 제약, 줌/패닝 |
-| [explanation/ml-assist-architecture.md](explanation/ml-assist-architecture.md) | ⚠️**설계 문서(미구현)** — ML 어시스트 스파인: `InferenceService`·`AssistController`·`ModelBackend`, provisional 도형, 스레딩, COCO 레인, 리스크 |
+| [explanation/ml-assist-architecture.md](explanation/ml-assist-architecture.md) | ML 어시스트 스파인의 설계 근거 + 구현 현황 — `InferenceService`·`AssistController`·`ModelBackend`, provisional 도형, 스레딩, COCO 레인, 리스크. **Phase 1(COCO I/O·추론 코어·어시스트 수직 슬라이스) 구현 완료(`a32acd3`), Phase 2~6(실제 ONNX 백엔드·능동학습·폴리곤·SAM) 미구현** |
 
 ## 코드 조감도 (한 줄)
 
@@ -53,6 +53,8 @@
 - [`libs/canvas.py`](../libs/canvas.py) — `Canvas`(드로잉/편집 QWidget).
 - [`libs/shape.py`](../libs/shape.py) — `Shape`(박스 하나의 데이터+렌더링).
 - [`libs/labelFile.py`](../libs/labelFile.py) — `LabelFile`(포맷별 writer 위임 파사드) + `LabelFileFormat`.
-- [`libs/pascal_voc_io.py`](../libs/pascal_voc_io.py) · [`libs/yolo_io.py`](../libs/yolo_io.py) · [`libs/create_ml_io.py`](../libs/create_ml_io.py) — 포맷별 Reader/Writer.
+- [`libs/pascal_voc_io.py`](../libs/pascal_voc_io.py) · [`libs/yolo_io.py`](../libs/yolo_io.py) · [`libs/create_ml_io.py`](../libs/create_ml_io.py) · [`libs/coco_io.py`](../libs/coco_io.py) — 포맷별 Reader/Writer.
+- [`libs/inference/`](../libs/inference/) — 모델 심(seam): `Detection`/`Mask` 데이터클래스, `ModelBackend` ABC, `StubBackend`, 레지스트리, `InferenceService`(단일 워커 스레드풀). 코어는 **Qt·numpy 없이** import된다.
+- [`libs/assist/`](../libs/assist/) — `AssistController`(AI 액션·provisional 도형 수명주기·신뢰도 임계값)와 `Detection → Shape` 어댑터.
 - [`libs/settings.py`](../libs/settings.py) · [`libs/stringBundle.py`](../libs/stringBundle.py) · [`libs/utils.py`](../libs/utils.py) — 설정 영속화·i18n·공용 헬퍼.
-- [`tools/label_to_csv.py`](../tools/label_to_csv.py) — VOC/YOLO 라벨을 AutoML CSV로 변환하는 독립 스크립트. `tests/` — 단위 테스트 8파일.
+- [`tools/label_to_csv.py`](../tools/label_to_csv.py) — VOC/YOLO 라벨을 AutoML CSV로 변환하는 독립 스크립트. `tests/` — 단위 테스트(코어 매트릭스는 AI 의존성 없이 green).

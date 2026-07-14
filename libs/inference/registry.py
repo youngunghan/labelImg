@@ -54,11 +54,35 @@ def _build_stub(config: Mapping[str, Any]) -> ModelBackend:
     )
 
 
-# Built-in table.  `yolo_onnx` and `mobile_sam` register here in a later phase;
-# their factories will do their heavy imports inside the function body and raise
-# MissingDependency when onnxruntime/numpy are absent.
+def _build_yolo_onnx(config: Mapping[str, Any]) -> ModelBackend:
+    # Same discipline, and now it matters: `libs.inference.yolo_onnx` is itself
+    # import-cheap (its onnxruntime/numpy imports live in the constructor), but
+    # importing it from here rather than at module scope keeps even that off the
+    # path of a process that only wanted `Detection`.
+    #
+    # Every value is passed as-is, `None` included: the backend owns its defaults
+    # (one place, not two), so `None` means "unset" rather than "0".
+    from .yolo_onnx import YoloOnnxBackend
+
+    return YoloOnnxBackend(
+        model_path=config.get('model_path'),
+        conf_threshold=config.get('conf_threshold'),
+        iou_threshold=config.get('iou_threshold'),
+        max_detections=config.get('max_detections'),
+        input_size=config.get('input_size'),
+        providers=config.get('providers'),
+        class_names=config.get('class_names'),
+        layout=config.get('layout'),
+    )
+
+
+# Built-in table.  `mobile_sam` registers here in a later phase; like yolo_onnx,
+# its factory will do the heavy imports inside the function body and raise
+# MissingDependency when onnxruntime/numpy are absent -- which build_backend
+# turns into "AI disabled", not a crash.
 _BACKENDS: Dict[str, BackendFactory] = {
     'stub': _build_stub,
+    'yolo_onnx': _build_yolo_onnx,
 }
 
 

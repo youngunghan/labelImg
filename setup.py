@@ -16,6 +16,16 @@ NAME = 'labelImg'
 # with the code. Keep this in step with the classifiers below.
 REQUIRES_PYTHON = '>=3.7'
 REQUIRED_DEP = ['pyqt5', 'lxml']
+# `pip install labelImg[ai]`: what the ONNX model backends (libs/inference/yolo_onnx.py)
+# need, and nothing else. Deliberately OUT of REQUIRED_DEP -- labelImg stays a plain
+# annotation tool on a base install, where build_backend() simply returns None and the
+# AI actions are greyed out. onnxruntime>=1.15 is the first release whose wheels cover
+# the Python range above; numpy is unpinned because onnxruntime already pins what it can
+# work with. No opencv: the letterbox resize is done in numpy (libs/inference/yolo_onnx.py),
+# and cv2 is not needed until the mask work of a later phase.
+EXTRA_DEP = {
+    'ai': ['onnxruntime>=1.15', 'numpy'],
+}
 about = {}
 
 with open(os.path.join(here, 'libs', '__init__.py')) as f:
@@ -105,6 +115,7 @@ setup(
     },
     include_package_data=True,
     install_requires=REQUIRED_DEP,
+    extras_require=EXTRA_DEP,
     license="MIT license",
     zip_safe=False,
     keywords='labelImg labelTool development annotation deeplearning',
