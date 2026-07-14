@@ -1,6 +1,6 @@
 # labelImg
 
-> Python + PyQt5 데스크톱 이미지 바운딩박스 주석 도구(v1.8.6). 이미지 위에 사각형을 그려 라벨을 붙이고 PASCAL VOC XML / YOLO txt / CreateML JSON / COCO JSON 네 포맷으로 저장한다. 단일 윈도우 앱: `MainWindow`(labelImg.py)가 컨트롤러, `Canvas`(libs/canvas.py)가 드로잉 위젯, `Shape`(libs/shape.py)가 박스 1개. 포맷 저장은 `LabelFile`(libs/labelFile.py)이 포맷별 Writer(PascalVocWriter·YOLOWriter·CreateMLWriter·COCOWriter)로 위임하고, 로드는 `MainWindow`가 포맷별 Reader(PascalVocReader·YoloReader·CreateMLReader·COCOReader)를 직접 호출한다. VOC/YOLO/CreateML은 이미지별 사이드카, COCO는 여러 이미지를 담는 **데이터셋 json 한 개**(Import/Export COCO 레인). ML 어시스트 스파인이 붙어 있다: `libs/inference/`(모델 백엔드 심 — Detection/Mask 데이터클래스, ModelBackend ABC, StubBackend, InferenceService 단일 워커 스레드풀)와 `libs/assist/`(AssistController — Auto-label/수락/거부/신뢰도 임계값, provisional 도형). **실제 모델 백엔드(ONNX YOLO)는 아직 없다 — 현재 등록된 백엔드는 결정론적 StubBackend뿐이다.** 설정은 `~/.labelImgSettings.pkl`(pickle). 기본 의존성 pyqt5·lxml (AI 코어는 추가 의존성 없이 동작). 리소스(아이콘·i18n 문자열)는 `resources.qrc`를 `pyrcc5`로 `libs/resources.py`에 컴파일. 코드 정본은 이 저장소.
+> Python + PyQt5 데스크톱 이미지 바운딩박스 주석 도구(v1.8.6). 이미지 위에 사각형을 그려 라벨을 붙이고 PASCAL VOC XML / YOLO txt / CreateML JSON / COCO JSON 네 포맷으로 저장한다. 단일 윈도우 앱: `MainWindow`(labelImg.py)가 컨트롤러, `Canvas`(libs/canvas.py)가 드로잉 위젯, `Shape`(libs/shape.py)가 박스 1개. 포맷 저장은 `LabelFile`(libs/labelFile.py)이 포맷별 Writer(PascalVocWriter·YOLOWriter·CreateMLWriter·COCOWriter)로 위임하고, 로드는 `MainWindow`가 포맷별 Reader(PascalVocReader·YoloReader·CreateMLReader·COCOReader)를 직접 호출한다. VOC/YOLO/CreateML은 이미지별 사이드카, COCO는 여러 이미지를 담는 **데이터셋 json 한 개**(Import/Export COCO 레인). ML 어시스트 스파인이 붙어 있다: `libs/inference/`(모델 백엔드 심 — Detection/Mask 데이터클래스, ModelBackend ABC, StubBackend, `YoloOnnxBackend`(Phase 2, 실제 ONNX YOLO 추론), InferenceService 단일 워커 스레드풀)와 `libs/assist/`(AssistController — Auto-label/수락/거부/신뢰도 임계값, provisional 도형). 기본 설치는 **백엔드가 설정되지 않아 AI 메뉴가 비활성화**돼 있고, `model/backend`를 `yolo_onnx`로 설정하고 `pip install labelImg[ai]`(onnxruntime·numpy)를 추가해야 `YoloOnnxBackend`로 실제 모델 추론이 켜진다. 설정은 `~/.labelImgSettings.pkl`(pickle). 기본 의존성 pyqt5·lxml (AI 코어는 추가 의존성 없이 동작). 리소스(아이콘·i18n 문자열)는 `resources.qrc`를 `pyrcc5`로 `libs/resources.py`에 컴파일. 코드 정본은 이 저장소.
 
 ## Tutorials
 - [처음 실행](tutorials/first-run.md): 설치 → 이미지 폴더 열기 → 박스 그리기 → 저장
@@ -10,6 +10,8 @@
 - [PASCAL VOC 라벨링](how-to/annotate-pascal-voc.md): 기본 XML 포맷
 - [YOLO 라벨링](how-to/annotate-yolo.md): txt + classes.txt 사이드카, 인덱스 주의
 - [CreateML 라벨링](how-to/annotate-createml.md): 누적 JSON
+- [COCO 라벨링](how-to/annotate-coco.md): 4번째 포맷, 데이터셋 json 하나(이미지별 사이드카 아님), Import/Export COCO..., `.json` 확장자가 CreateML과 겹쳐 내용 스니핑으로 구분
+- [AI 자동 라벨링](how-to/auto-label.md): Auto-label Image(Ctrl+I)로 모델 제안 → Accept All(Ctrl+Return)/Reject All(Ctrl+Backspace)·신뢰도 슬라이더, 기본 설치는 백엔드 미설정으로 AI 메뉴 비활성화, 백엔드 설정 + `pip install labelImg[ai]`(onnxruntime)로 실제 추론 활성화
 - [verify/difficult](how-to/verify-and-difficult.md): 검증 플래그·difficult·single-class vs use-default-label·auto-save·draw-square·display-labels
 - [추가 기능](how-to/more-features.md): ⚠️분류 good/bad(g/b, 파일 이동)·이전박스 복사(Ctrl+V)·Edit Default Classes·advanced 모드·밝기(LightWidget)·박스 색·fit/recent. 포크 고유 기능 포함
 - [CSV export](how-to/export-to-csv.md): tools/label_to_csv.py → Google Cloud AutoML CSV
@@ -23,9 +25,9 @@
 
 ## Explanation
 - [아키텍처](explanation/architecture.md): MainWindow(God-object)↔Canvas↔Shape↔I/O, Qt 시그널/슬롯
-- [어노테이션 포맷 설계](explanation/annotation-formats.md): 3포맷·전환·reader/writer 대칭·difficult/verified
+- [어노테이션 포맷 설계](explanation/annotation-formats.md): 4포맷(VOC/YOLO/CreateML/COCO)·전환·reader/writer 대칭·difficult/verified·COCO 데이터셋 레인과 `.json` 충돌
 - [캔버스 상호작용 모델](explanation/canvas-interaction-model.md): CREATE/EDIT·마우스·정점이동·정사각형·줌/패닝
-- [ML 어시스트 아키텍처](explanation/ml-assist-architecture.md): ML 어시스트 스파인의 **설계 근거(why/트레이드오프) + 구현 현황**. libs/inference·libs/assist 형제 패키지, InferenceService·AssistController 컨트롤러 2개, Detection/Mask 데이터클래스 심(Shape·Qt 미노출), provisional 도형 수명주기(단일 저장 초크포인트 필터), QThreadPool 단일 워커·stale 결과 폐기, COCO 데이터셋 레인, 사각형 결합의 벽. **상태: Phase 1(1a COCO I/O · 1b 추론 코어 · 1c 어시스트 수직 슬라이스)은 구현·머지 완료(`a32acd3`) — 이 모듈들은 실제로 존재하며 문서가 `file.py:line`으로 인용한다. Phase 2~6(YoloOnnxBackend/[ai] extra, 수락·거부 다듬기, 능동학습, 폴리곤/키포인트, MobileSAM)은 미구현이고 이름으로만 지칭된다.** 열린 리스크: 사각형 결합의 벽(가장 비싼 리워크), 역-letterbox 실전 검증(Phase 2), `_dismissed` 라운드 스코프(비차단)
+- [ML 어시스트 아키텍처](explanation/ml-assist-architecture.md): ML 어시스트 스파인의 **설계 근거(why/트레이드오프) + 구현 현황**. libs/inference·libs/assist 형제 패키지, InferenceService·AssistController 컨트롤러 2개, Detection/Mask 데이터클래스 심(Shape·Qt 미노출), provisional 도형 수명주기(단일 저장 초크포인트 필터), QThreadPool 단일 워커·stale 결과 폐기, COCO 데이터셋 레인, 사각형 결합의 벽. **상태: Phase 1(1a COCO I/O · 1b 추론 코어 · 1c 어시스트 수직 슬라이스, `a32acd3`)과 Phase 2(`YoloOnnxBackend`·`[ai]` extra·`test-ai` CI 잡)는 구현·머지 완료 — 이 모듈들은 실제로 존재하며 문서가 `file.py:line`으로 인용한다. Phase 3~6(수락·거부 다듬기+Auto-label Folder, 능동학습, 폴리곤/키포인트, MobileSAM)은 미구현이고 이름으로만 지칭된다.** 열린 리스크: 사각형 결합의 벽(가장 비싼 리워크, 여전히 열림), `_dismissed` 라운드 스코프(비차단, 신규). 역-letterbox 좌표계 매핑은 Phase 2에서 실제로 한 번 틀렸다가(반올림 비대칭) 잡혀 닫혔다 — ml-assist-architecture.md 리스크 2 참고
 
 ## Source of truth
 - 코드: `labelImg.py`, `libs/*.py`, `tools/label_to_csv.py`

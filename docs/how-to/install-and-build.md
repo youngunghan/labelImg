@@ -9,6 +9,12 @@
 - `pyqt5`, `lxml`.
 - 핀 고정(`requirements/requirements-linux-python3.txt`): `pyqt5==5.14.1`, `lxml==4.9.1`.
   - (루트 README 본문은 `pyqt5==5.15.2`를 권장한다 — 핀은 재현용, 본문은 일반 권장값.)
+- **선택 extra `[ai]`**: `onnxruntime>=1.15`, `numpy`(`setup.py:26-28`, `EXTRA_DEP`). AI 자동 라벨링의
+  실제 ONNX 모델 백엔드(`libs/inference/yolo_onnx.py`)에만 필요하고 기본 설치(`REQUIRED_DEP`)에는
+  들어가지 않는다 — 설치 안 해도 `pyqt5`+`lxml`만으로 앱은 완전히 동작한다. 다만 기본 설치는
+  **백엔드가 전혀 설정되지 않은 상태**라 AI 메뉴는 처음부터 비활성화돼 있다(설치/설정 안내 툴팁만
+  뜬다) — extras를 설치하고 모델 백엔드/경로를 명시적으로 설정해야 비로소 켜진다. 자세한 사용법은
+  [auto-label.md](auto-label.md).
 
 ## A. PyPI 설치(가장 간단)
 
@@ -16,6 +22,12 @@
 pip3 install labelImg
 labelImg
 labelImg [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
+```
+
+AI 자동 라벨링까지 실제 ONNX 모델로 쓰려면 `[ai]` extra를 함께 설치한다:
+
+```shell
+pip3 install labelImg[ai]
 ```
 
 ## B. 소스에서 실행

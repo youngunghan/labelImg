@@ -58,8 +58,22 @@ SHORTCUT_AUTO_LABEL = 'Ctrl+I'
 SHORTCUT_ACCEPT_ALL = 'Ctrl+Return'
 SHORTCUT_REJECT_ALL = 'Ctrl+Backspace'
 
-UNAVAILABLE_HINT = ("No model backend available — install the optional extras: "
-                    "pip install labelImg[ai]")
+# Two distinct "AI disabled" causes need two distinct hints (see
+# _unavailable_hint / refresh_actions): nothing was configured at all (fresh
+# install, SETTING_MODEL_BACKEND unset -- DEFAULT_BACKEND is None precisely so
+# this is the out-of-the-box state), versus a backend WAS named but its
+# construction failed (missing extras, or extras present but SETTING_MODEL_PATH
+# missing/invalid). Telling a fresh-install user to just `pip install
+# labelImg[ai]` would be accurate but incomplete -- the extras alone do nothing
+# without also choosing a backend and a model path -- so that case gets its own
+# message rather than reusing the "something failed" one.
+NO_BACKEND_CONFIGURED_HINT = (
+    "No model backend configured — set a backend (e.g. 'yolo_onnx') and a model "
+    "path in Settings; installing the extras alone is not enough: "
+    "pip install labelImg[ai]")
+BACKEND_UNAVAILABLE_HINT = (
+    "Model backend %r is unavailable — install the optional extras "
+    "(pip install labelImg[ai]) and check that the configured model path is valid")
 
 
 class AssistController(QObject):
@@ -127,6 +141,19 @@ class AssistController(QObject):
 
     def is_available(self):
         return self.service.is_available()
+
+    def _unavailable_hint(self):
+        """Which "AI disabled" message applies right now.
+
+        ``self.backend_name`` is ``None`` on a fresh install (DEFAULT_BACKEND is
+        None; see libs/inference/registry.py) -- that is "nothing configured
+        yet", not "something configured is broken", and the two need different
+        advice: installing the extras alone does not help someone who has not
+        also picked a backend and a model path.
+        """
+        if not self.backend_name:
+            return NO_BACKEND_CONFIGURED_HINT
+        return BACKEND_UNAVAILABLE_HINT % self.backend_name
 
     # -- actions -----------------------------------------------------------
 
@@ -219,7 +246,7 @@ class AssistController(QObject):
             self.action_threshold.setEnabled(available)
 
         # A greyed-out menu with no explanation reads as a bug; say why.
-        hint = UNAVAILABLE_HINT if not available else ''
+        hint = self._unavailable_hint() if not available else ''
         for action in self._actions:
             action.setToolTip(hint or action.statusTip() or action.text())
             if hint:
@@ -266,7 +293,7 @@ class AssistController(QObject):
 
     def auto_label_image(self, _value=False):
         if not self.is_available():
-            self.app.status(UNAVAILABLE_HINT)
+            self.app.status(self._unavailable_hint())
             return False
         file_path = self.app.file_path
         if not file_path:

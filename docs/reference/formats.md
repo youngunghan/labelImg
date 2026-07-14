@@ -1,8 +1,8 @@
 # 레퍼런스: 어노테이션 포맷
 
-세 출력 포맷의 **정확한 구조**다. 배경·설계 의도는 [../explanation/annotation-formats.md](../explanation/annotation-formats.md).
+네 출력 포맷의 **정확한 구조**다. 배경·설계 의도는 [../explanation/annotation-formats.md](../explanation/annotation-formats.md).
 
-공통 전제: **VOC와 YOLO는** 저장 직전 박스가 `(x_min, y_min, x_max, y_max)` 절대 픽셀 정수로 환원되며(`libs/labelFile.py:151-174`, 호출부는 `labelFile.py:78, 108`), `x_min`/`y_min`은 1 미만이면 1로 클램프된다. **CreateML은 이 변환을 거치지 않는다** — 캔버스의 float 좌표가 가공 없이 사용되어 저장값(중심 `x`/`y`, `width`/`height`)에 소수점(예: 297.5)이 나올 수 있고 1-클램프도 적용되지 않는다(`labelFile.py:39-51`, `create_ml_io.py:42-47, 73-93`). 이미지 크기는 `[height, width, depth]` 순서(`depth`=grayscale 1, 그 외 3).
+공통 전제: **VOC·YOLO·COCO는** 저장 직전 박스가 `(x_min, y_min, x_max, y_max)` 절대 픽셀 정수로 환원되며(`LabelFile.convert_points_to_bnd_box`, `libs/labelFile.py:182-205`, 호출부는 `labelFile.py:79`(COCO)`, 109`(VOC)`, 139`(YOLO)), `x_min`/`y_min`은 1 미만이면 1로 클램프된다. **CreateML은 이 변환을 거치지 않는다** — 캔버스의 float 좌표가 가공 없이 사용되어 저장값(중심 `x`/`y`, `width`/`height`)에 소수점(예: 297.5)이 나올 수 있고 1-클램프도 적용되지 않는다(`labelFile.py:41-53`, `create_ml_io.py:42-47, 73-93`). 이미지 크기는 `[height, width, depth]` 순서(`depth`=grayscale 1, 그 외 3).
 
 ---
 
@@ -83,7 +83,7 @@ dog
 주의:
 - **difficult는 저장되지 않으며 읽을 때 항상 `False`** (`yolo_io.py:172-173`).
 - (2026-07-08 통일) 저장(`yolo_io.py:60-68`)은 라벨 txt와 `classes.txt` 모두 `DEFAULT_ENCODING`(utf-8)으로 고정됐다 — 비ASCII 클래스명이 플랫폼과 무관하게 라운드트립된다. (이전에는 `classes.txt`와 읽기 경로가 OS 로케일을 따라 한국어 Windows(cp949)에서 mojibake/크래시 위험이 있었다.) 읽기는 둘로 나뉜다: 라벨 txt는 `ENCODE_METHOD`(=`DEFAULT_ENCODING`)으로 읽고(`yolo_io.py:150`), `classes.txt`는 하드코딩된 `utf-8-sig`로 읽어(`yolo_io.py:110`) 첫 클래스명 앞의 Windows/Notepad BOM을 제거한다.
-- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:149-173`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:2012-2021`).
+- `parse_yolo_format`은 공백 분리 5필드를 검증하고 **불량 라인(필드 수·숫자 변환·NaN/inf·클래스 인덱스 범위 오류)은 건너뛰며** `skipped_lines`로 집계한다(`yolo_io.py:149-173`, 포크 견고화 2026-07-07 — 상류는 단일 공백 5필드 강제 언패킹이라 한 줄만 틀려도 크래시). `classes.txt` 부재 시 `YoloParseError`를 던지며(`yolo_io.py:104-107`), 호출부는 이를 에러 대화상자로 보여준다(`labelImg.py:2200-2209`).
 
 ---
 
@@ -122,9 +122,52 @@ dog
 
 ---
 
+## 4. COCO (`.json`, 데이터셋 레벨)
+
+구현: `libs/coco_io.py` (`COCOWriter` / `COCOReader`).
+
+**CRITICAL**: COCO는 앞의 세 포맷과 달리 이미지별 사이드카가 아니라 **데이터셋 레벨** 포맷이다 — 하나의 json이 여러 이미지의 `images`/`annotations`/`categories`를 함께 담는다(설계 노트, `coco_io.py:11-17`). 기본 타깃은 `<save dir>/annotations.json`(`COCO_DEFAULT_DATASET_NAME`, `coco_io.py:17`; 타깃 결정 로직 `MainWindow.coco_dataset_target`, `labelImg.py:670-687`)이고, File 메뉴의 **Import COCO...** / **Export COCO...**(`labelImg.py:257-260, 2264-2314`)로 다른 파일을 명시적으로 고를 수 있다. `save_labels`가 COCO를 저장할 때는 이 공유 파일을 **read-modify-write**로 병합한다 — 매 저장마다 파일 전체를 읽어 현재 이미지의 `images`/`annotations` 항목만 교체하고 다시 쓴다(`COCOWriter.save`, `coco_io.py:216-256`; 디스패치 `labelImg.py:1058-1069`). VOC/YOLO/CreateML과 달리 이미지별 자동 로드(사이드카 `<stem>.json`)에는 연결되지 않는다 — `<stem>.json`을 COCO로 오인해 자동 로드하는 경로는 없다.
+
+```json
+{
+  "images": [
+    {"id": 1, "file_name": "train/0001.jpg", "width": 1920, "height": 1080}
+  ],
+  "annotations": [
+    {
+      "id": 1, "image_id": 1, "category_id": 1,
+      "bbox": [60, 40, 370, 464],
+      "area": 171680,
+      "iscrowd": 0
+    }
+  ],
+  "categories": [
+    {"id": 1, "name": "person", "supercategory": ""}
+  ]
+}
+```
+
+- `bbox`는 `[x, y, width, height]`(좌상단 기준) — 나머지 세 포맷의 `(xmin,ymin,xmax,ymax)`/중심 표현과 다르다(`coco_io.py:244-247`, 읽을 때 복원은 `coco_io.py:330-334`).
+- `area = width * height`, `iscrowd`는 항상 `0`(`coco_io.py:248-249`).
+- `category_id` ↔ 이름 매핑은 병합을 거듭해도 안정적이다: `sync_categories`가 기존 `categories`의 id를 그대로 재사용하고 새 라벨명만 다음 id를 받는다(재넘버링 없음, `coco_io.py:140-161`).
+
+이미지 키잉(상대 경로) — **바스네임 충돌 방지**:
+- `images[].file_name`은 데이터셋 json 기준 **상대 경로**(슬래시 통일)이지, 단순 basename이 아니다(`dataset_relative_name`, `coco_io.py:34-61`). labelImg는 디렉터리를 재귀적으로 스캔하므로(`MainWindow.scan_all_images`가 `os.walk`) `train/0001.jpg`와 `val/0001.jpg`처럼 **basename이 같은 두 이미지**가 흔한 워크플로다 — basename만으로 키를 잡으면 하나가 다른 하나의 `images[]` 항목을 덮어쓰고, 읽을 때는 두 이미지의 박스가 합쳐지는 **조용한 데이터 손상**이 발생한다. 상대 경로를 계산할 수 없을 때(상대경로 입력, 또는 Windows에서 서로 다른 드라이브)만 basename으로 폴백한다(`coco_io.py:52-61`).
+- 다른 도구가 만든 데이터셋처럼 basename으로만 키가 잡힌 기존 항목은, 그 basename에 해당하는 후보가 **정확히 하나**일 때만 상대 경로로 마이그레이션해 채택한다(쓰기 쪽 `COCOWriter.sync_image`, `coco_io.py:174-214`; 읽기 쪽 동등한 폴백은 `COCOReader.parse_json`, `coco_io.py:292-317`). 후보가 둘 이상이면(바로 그 basename 충돌 상황) 채택하지 않는다.
+
+COCO가 담지 **않는** 것:
+- `difficult` — COCO 스키마에 필드가 없어 저장 시 버려지고, 읽으면 항상 `False`로 복원된다(`COCOWriter.add_bnd_box` 주석, `coco_io.py:131-138`; `COCOReader.add_shape`, `coco_io.py:330-336`).
+- `verified` — writer/reader 모두 `verified=False`로 고정된다(`coco_io.py:129, 273`). `MainWindow.verify_image`는 COCO 포맷으로 저장할 때 "COCO는 verified/difficult를 저장하지 않는다"는 상태바 안내를 띄운다(`labelImg.py:1587-1593`).
+
+`.json` 콘텐츠 스니핑 (COCO vs CreateML):
+
+COCO와 CreateML은 둘 다 확장자가 `.json`이라 확장자만으로는 리더를 고를 수 없다. 그래서 모든 `.json` 로드 경로는 **먼저 파싱한 내용을 살펴** 리더를 정한다 — 최상위가 `images`/`annotations`/`categories` 키를 가진 dict면 COCO, 리스트면 CreateML(`is_coco_dict`, `coco_io.py:82-91`; 파일 단위 래퍼 `is_coco_json`, `coco_io.py:94-102`). 자동 로드 디스패치는 `MainWindow.load_json_by_filename`(`labelImg.py:2212-2222`)이 맡는다(주석: `CreateMLReader`는 디코드 오류만 잡으므로 이 스니핑 없이는 COCO 데이터셋을 조용히 "박스 0개"로 오독했을 것). `load_coco_json_by_filename`(`labelImg.py:2237-2262`)은 데이터셋에 이 이미지가 없으면(`found_image=False`) 포맷을 바꾸지 않고 조용히 물러난다 — 저장 디렉터리에 우연히 있는 COCO 데이터셋이 무관한 이미지들의 포맷까지 바꾸지 않게 하기 위함이다. **Import COCO...** 다이얼로그도 같은 스니핑으로 고른 파일을 검증한다(`import_coco_dialog`, `labelImg.py:2264-2291`).
+
+---
+
 ## 공통 Reader 인터페이스
 
-세 Reader 모두 `get_shapes()`가 **같은 5-튜플 리스트**를 반환한다:
+네 Reader 모두 `get_shapes()`가 **같은 5-튜플 리스트**를 반환한다:
 
 ```python
 (label, points, line_color, fill_color, difficult)

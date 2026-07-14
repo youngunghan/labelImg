@@ -255,9 +255,22 @@ class TestRegistry(unittest.TestCase):
         # conf_threshold 0.85 keeps only the 0.9 box out of 3.
         self.assertEqual(1, len(backend.predict(FakeImage(200, 200))))
 
-    def test_empty_or_missing_config_falls_back_to_default_backend(self):
-        self.assertIsInstance(build_backend(), StubBackend)
-        self.assertIsInstance(build_backend({}), StubBackend)
+    def test_default_config_yields_no_backend(self):
+        # REGRESSION: a fresh install has no SETTING_MODEL_BACKEND configured, so
+        # config.get('backend') is absent/None here too. That must degrade to "AI
+        # disabled" like every other missing-backend case -- not silently
+        # construct StubBackend, whose predictions are fabricated boxes derived
+        # from image dimensions (libs/inference/stub.py), not a real model. A
+        # user who never asked for AI must not get fake detections they could
+        # mistake for real ones and accept into their dataset.
+        self.assertIsNone(build_backend())
+        self.assertIsNone(build_backend({}))
+        self.assertIsNone(build_backend({'backend': None}))
+
+    def test_explicit_stub_backend_is_still_a_fully_working_opt_in(self):
+        # StubBackend remains a legitimate backend for tests/explicit use -- it
+        # is just no longer the silent default.
+        self.assertIsInstance(build_backend({'backend': 'stub'}), StubBackend)
 
     def test_unknown_backend_returns_none_without_raising(self):
         self.assertIsNone(build_backend({'backend': 'no_such_model'}))

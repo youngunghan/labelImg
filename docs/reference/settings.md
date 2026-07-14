@@ -14,7 +14,7 @@ labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pk
 | `reset()` | `:40-45` | pkl 파일 삭제, `data={}`, `path=None` |
 
 - 시작 시 `MainWindow.__init__`이 `Settings().load()`로 메모리에 올린다.
-- 종료 시 `closeEvent`(`labelImg.py:1285`)가 아래 키를 모두 기록한 뒤 `save()`한다.
+- 종료 시 `closeEvent`(`labelImg.py:1417`)가 아래 키를 모두 기록한 뒤 `save()`한다.
 
 > ⚠️ `load()`가 손상된 pkl을 조용히 무시하므로(빈 설정으로 동작), 설정이 이상하면 파일을 지우는 게 가장 확실하다 → [../how-to/reset-and-troubleshoot.md](../how-to/reset-and-troubleshoot.md).
 > ⚠️ `reset()` 이후 `path=None`이라 그 세션의 이후 `save()`는 저장되지 않는다(`settings.py:24,45`).
@@ -37,16 +37,23 @@ labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pk
 | `SETTING_AUTO_SAVE` | `autosave` | 자동 저장 on/off |
 | `SETTING_SINGLE_CLASS` | `singleclass` | single-class(기본 라벨) 모드 |
 | `SETTING_DRAW_SQUARE` | `draw/square` | 정사각형 그리기 |
-| `SETTING_LABEL_FILE_FORMAT` | `labelFileFormat` | 마지막 사용 포맷(VOC/YOLO/CreateML) |
+| `SETTING_LABEL_FILE_FORMAT` | `labelFileFormat` | 마지막 사용 포맷(VOC/YOLO/CreateML/COCO) |
 | `SETTING_CLASSIFY_TARGETS` | `classifyTargets` | (포크, 2026-07-08) 분류 카테고리 `(단축키, 폴더이름)` 쌍 목록 — 기본 `[('g','good'),('b','bad')]`. Edit Classify Categories 저장 시 즉시 `save()`되며, closeEvent가 개별 기록하지 않아도 로드된 dict에 남아 종료 시에도 보존된다 |
+| `SETTING_MODEL_BACKEND` | `model/backend` | (포크, ML-assist) 사용할 추론 백엔드 이름(`libs/inference/registry.py`의 등록 키, 예: `'stub'`/`'yolo_onnx'`). `DEFAULT_BACKEND`는 `'stub'`가 아니라 **`None`**이다(`registry.py:37`) — 설정 파일에 이 키가 없으면 **어떤 백엔드도 자동 선택되지 않는다.** 기본 설치는 백엔드 미설정 상태이고 AI 액션은 비활성으로 남는다(`AssistController.__init__`, `libs/assist/controller.py:87`) |
+| `SETTING_MODEL_PATH` | `model/path` | (포크, ML-assist) `yolo_onnx` 백엔드가 로드할 `.onnx` 파일 경로. 기본값 `None`(모델 미설정 → AI 액션 비활성) — `controller.py:74` |
+| `SETTING_CONF_THRESHOLD` | `model/confThreshold` | (포크, ML-assist) AI 메뉴 슬라이더의 신뢰도 임계값(0.0~1.0로 클램프, `AssistController._sanitize_threshold`). 기본값 `DEFAULT_CONF_THRESHOLD=0.5`(`controller.py:46, 75-76`) |
 
-> ⚠️ `SETTING_WIN_GEOMETRY`(`window/geometry`)는 `constants.py:5`에 **정의만** 되어 있고 `closeEvent`에서는 저장되지 않는다 — 실제로 기록되는 창 키는 size/position/state뿐이다(`labelImg.py:1295-1297`).
+세 키 모두 `constants.py:24-26`에 정의되어 있고, `closeEvent`가 `self.assist.backend_name`/`model_path`/`threshold`를 그대로 기록한다(`labelImg.py:1451-1453`; 백엔드/모델 경로는 아직 고르는 UI가 없어 설정 파일로만 바뀐다는 주석이 붙어 있다, `labelImg.py:1449-1450`).
 
-> ℹ️ **기록 조건**: `filename`은 단일 파일 모드에서만 실제 경로가 저장되고 폴더를 연 상태로 종료하면 `''`가 저장된다(`labelImg.py:1290-1293`). `savedir`·`lastOpenDir`도 종료 시점에 해당 경로가 존재하지 않으면 `''`로 기록된다(`labelImg.py:1302-1310`).
+> ⚠️ `SETTING_WIN_GEOMETRY`(`window/geometry`)는 `constants.py:5`에 **정의만** 되어 있고 `closeEvent`에서는 저장되지 않는다 — 실제로 기록되는 창 키는 size/position/state뿐이다(`labelImg.py:1427-1429`).
 
-> ℹ️ **시작 시 우선순위 (로컬 수정, 2026-07-03)**: `labelImg.py 이미지폴더 [클래스파일] [저장폴더]` 형태로 명령줄 인자를 주고 시작하면, `__init__`(`labelImg.py:577`)이 `open_dir_dialog(dir_path=이미지폴더, silent=True)`를 호출하고 `open_dir_dialog`(`labelImg.py:1390-1393`)는 **명시된 `dir_path`를 pkl의 `lastOpenDir`보다 우선**한다. 이때 `default_save_dir`도 설정되는데, 명령줄 저장폴더 인자가 있으면 그것을 유지하고 없으면 연 폴더가 된다(`labelImg.py:1410-1413`). 따라서 pkl의 `savedir`·`lastOpenDir`는 그 세션에서 무시되고, 종료 시 새 값으로 갱신된다. pkl의 `savedir`는 명령줄 저장폴더 인자가 없을 때만 시작 시 적용된다(`labelImg.py:534-535`). (수정 전에는 pkl의 `lastOpenDir`가 명령줄 폴더보다 우선되어 라벨 XML을 찾지 못하는 문제가 있었다.)
+> ℹ️ **기록 조건**: `filename`은 단일 파일 모드에서만 실제 경로가 저장되고 폴더를 연 상태로 종료하면 `''`가 저장된다(`labelImg.py:1422-1425`). `savedir`·`lastOpenDir`도 종료 시점에 해당 경로가 존재하지 않으면 `''`로 기록된다(`labelImg.py:1434-1442`).
+
+> ℹ️ **시작 시 우선순위 (로컬 수정, 2026-07-03)**: `labelImg.py 이미지폴더 [클래스파일] [저장폴더]` 형태로 명령줄 인자를 주고 시작하면, `__init__`(`labelImg.py:614`)이 `open_dir_dialog(dir_path=이미지폴더, silent=True)`를 호출하고 `open_dir_dialog`(`labelImg.py:1522-1534`)는 **명시된 `dir_path`를 pkl의 `lastOpenDir`보다 우선**한다. 다이얼로그 취소 시 상태 불변 조기 반환(`labelImg.py:1541-1543`). 이때 `default_save_dir`도 설정되는데, 명령줄 저장폴더 인자가 있으면 그것을 유지하고 없으면 연 폴더가 된다(`labelImg.py:1549-1552`). 따라서 pkl의 `savedir`·`lastOpenDir`는 그 세션에서 무시되고, 종료 시 새 값으로 갱신된다. pkl의 `savedir`는 명령줄 저장폴더 인자가 없을 때만 시작 시 적용된다(`labelImg.py:569-572`). (수정 전에는 pkl의 `lastOpenDir`가 명령줄 폴더보다 우선되어 라벨 XML을 찾지 못하는 문제가 있었다.)
 
 ## 기타 상수
 
-- `FORMAT_PASCALVOC='PascalVOC'`, `FORMAT_YOLO='YOLO'`, `FORMAT_CREATEML='CreateML'` — 포맷 토큰.
+- `FORMAT_PASCALVOC='PascalVOC'`, `FORMAT_YOLO='YOLO'`, `FORMAT_CREATEML='CreateML'`, `FORMAT_COCO='COCO'`(포크 추가, `constants.py:18`) — 포맷 토큰.
 - `DEFAULT_ENCODING='utf-8'` — `ustr`과 I/O 모듈의 기본 인코딩.
+
+COCO의 데이터셋 파일 자체(`annotations.json` 등)는 이 pkl 설정과 무관하다 — 세션 중 고른 COCO 데이터셋 경로(`MainWindow.coco_dataset_path`)는 종료 시 저장되지 않으며, 다음 세션은 다시 기본 타깃(`<save dir>/annotations.json`)에서 시작한다 → [formats.md](formats.md).

@@ -89,7 +89,7 @@ graph TD
 | `libs/inference/types.py` | `Detection`(`:55`)·`Mask`(`:76`)·`SegPrompt`(`:90`)·`Prediction`(`:103`) 데이터클래스 — AI 심의 어휘. 능동학습 채점 함수 `least_confidence`(`:118`)도 여기 있다(순수 함수, 아직 호출부 없음) | **완료** (1b) |
 | `libs/inference/backend.py` | `ModelBackend` ABC(`:36`) — `predict`(추상, `:57`)/`segment`(`:66`)/`embed`(`:79`) + capability 플래그. 선택 의존성 부재는 `MissingDependency`(`:26`)로 신호 | **완료** (1b) |
 | `libs/inference/stub.py` | `StubBackend`(`:61`) — 결정론적·의존성 0. **테스트를 구동하는 주체**이며, Phase 1 시점의 유일한 백엔드 | **완료** (1b) |
-| `libs/inference/registry.py` | `build_backend(config)` → 백엔드, 의존성이 없으면 예외가 아니라 **`None`**. 기본 백엔드는 `'stub'`(`DEFAULT_BACKEND`). ⚠️ 이 파일은 Phase 2에서 `yolo_onnx` 팩토리가 추가되며 이미 한 번 바뀌었고 Phase 6의 `mobile_sam` 팩토리 추가로 다시 바뀔 것이라 **줄 번호를 달지 않는다** | **완료** (1b) · Phase 2에서 `yolo_onnx` 팩토리 추가 완료 |
+| `libs/inference/registry.py` | `build_backend(config)` → 백엔드, 의존성이 없으면 예외가 아니라 **`None`**. `DEFAULT_BACKEND`는 `'stub'`가 아니라 **`None`**이다 — 설정에 `model/backend`가 없으면 아무 백엔드도 자동 선택하지 않는다(기본 설치는 백엔드 미설정 상태이고 AI 메뉴는 비활성이다). `'stub'`는 레지스트리에 계속 등록돼 있지만 명시적으로 골라야 쓰인다. ⚠️ 이 파일은 Phase 2에서 `yolo_onnx` 팩토리가 추가되며 이미 한 번 바뀌었고 Phase 6의 `mobile_sam` 팩토리 추가로 다시 바뀔 것이라 **줄 번호를 달지 않는다** | **완료** (1b) · Phase 2에서 `yolo_onnx` 팩토리 추가 완료 |
 | `libs/inference/service.py` | `InferenceService`(`:186`): 단일 워커 `QThreadPool`(`:142-154`), 비동기 `predict_async`(`:246`), 결과 시그널(`:195-197`), 이미지별 임베딩 캐시(`:235-242`) | **완료** (1c) |
 | `libs/assist/controller.py` | `AssistController`(`:65`): AI 액션(`:133-157`), provisional 수명주기, 신뢰도 임계값(`:246-263`) | **완료** (1c). 능동학습 재정렬은 Phase 4 |
 | `libs/assist/suggestion.py` | `Detection → Shape` 어댑터(`:42-58`) (UI 경계의 **유일한** 변환 지점) + 수락 시 스타일 전환(`:65-77`) | **완료** (1c) |
@@ -274,11 +274,15 @@ Phase 1은 이 선을 지켰다(위 §왜 새 클래스인가의 배선 목록).
 
 ### 2. 좌표계 매핑
 
-> **⬜ 열림** — 실전 검증은 Phase 2에서.
+> **✅ 닫힘** (Phase 2) — 이 리스크는 **실제로 터졌다.** 아래는 실전에서 무엇이 어떻게 틀렸고 어떻게 잡았는지의 기록이다.
 
-역-letterbox는 **백엔드 안**에서 일어나야 한다. 틀리면 증상이 조용하다 — 예외가 아니라 **모든 박스가 일정하게 밀리거나 스케일이 어긋난다.** 스텁이 아닌 실제 이미지로 라운드트립 테스트를 걸어야 잡힌다.
+예측대로 역-letterbox는 조용히 틀렸다: **forward 방향(letterbox 페인트)은 pad를 정수 픽셀로 반올림해 캔버스에 붙였는데, inverse 방향(박스 역변환)은 반올림하지 않은 float pad를 그대로 빼고 있었다.** 원본 크기가 모델 입력 크기로 딱 나눠떨어지지 않으면(예: 1000×995 → 640×640은 위아래로 3행이 남아 이상적인 pad는 1.5) 두 방향이 같은 숫자를 두 번 따로 계산하다가 어긋난 것이다 — 실제 붙인 자리(정수로 내림된 행)와 되돌릴 때 뺀 자리(1.5)가 반 픽셀만큼 달라, **홀수 padding이 나오는 이미지마다 모든 박스가 `0.5 / scale` 원본 픽셀만큼 일정하게 밀렸다.** 예외 없이 조용히 틀렸다는 점에서 위 예측 그대로였다.
 
-계약 자체는 코드에 못 박혀 있고(`libs/inference/types.py:10-28`의 좌표 계약, `detection_to_shape`에 스케일 연산 0줄) `StubBackend`가 그것을 테스트에서 강제한다. 하지만 **역-letterbox 산술이 실제로 맞는지는 `YoloOnnxBackend`가 들어와야 검증된다** — 이 리스크는 Phase 2의 것이다.
+**고친 방법은 이중 계산 자체를 없애는 것**: `_letterbox_geometry()`(`libs/inference/yolo_onnx.py:129-164`) 하나가 `(scale, new_w, new_h, pad_x, pad_y)`를 계산하는 **유일한 소스**가 됐고, pad는 짝을 정수로 내림해(`libs/inference/yolo_onnx.py:162-163`) 홀수 나머지를 하단/우측에 준다. forward 쪽 `_letterbox()`는 이 값을 그대로 받아 캔버스에 붙이고(`libs/inference/yolo_onnx.py:908`, 실제 페인트는 `:937-939`) 별도 산술을 하지 않으며, inverse 쪽 `letterbox_params()`/`inverse_letterbox()`(`libs/inference/yolo_onnx.py:167-179`, `:182-216`)도 같은 함수가 반환한 같은 pad를 받는다. 한 값을 두 번 다시 계산하지 않으므로 두 방향이 서로 어긋날 수 없다 — 이 계약은 모듈 docstring에도 못박혀 있다(`libs/inference/yolo_onnx.py:48-57`).
+
+**테스트는 계산된 값이 아니라 실제로 붙인 텐서를 읽어서 검증한다** — 이게 핵심이다. 순수-파이썬 라운드트립 테스트(`letterbox_params`를 `inverse_letterbox`로 되돌리는 식)는 자기 자신하고만 대조하므로 애초에 이 버그를 잡지 못했을 것이다. 대신 `content_rect()`(`tests/test_yolo_onnx.py:797-813`)는 흰 이미지를 회색 패딩 위에 붙인 뒤 **텐서에서 흰 픽셀이 시작하는 좌표를 직접 읽어** "진짜로 붙은 자리"를 구한다. `test_the_paste_offset_is_exactly_the_pad_the_inverse_subtracts`(`tests/test_yolo_onnx.py:815-828`)는 홀수/짝수 padding이 섞인 다섯 원본 크기(`1000x995`, `995x1000`, `1000x993`, `1280x720`, `65x33`)에서 이 실측 좌표가 `letterbox_params`가 돌려주는 pad와 **정확히 일치**함을 규정한다. `test_an_odd_pad_maps_the_pasted_image_back_onto_the_whole_image`(`tests/test_yolo_onnx.py:830-858`)는 한 걸음 더 나가 end-to-end로 확인한다: 실제 페인트된 사각형 좌표를 읽어 그 자리에 정확히 박스 하나를 예측하게 만든 뒤, `predict()`가 돌려준 박스가 **원본 이미지 전체**(`(0, 0, orig_w, orig_h)`)로 정확히 복원되는지 본다 — 고치기 전에는 이 케이스에서 위쪽 경계가 `y=0` 대신 `y=0.78`로 돌아왔다.
+
+닫힌 근거를 요약하면: 계약(`libs/inference/types.py:10-28`, `detection_to_shape`에 스케일 연산 0줄)은 애초부터 옳았고, **깨진 것은 그 계약을 만족시키는 산술의 구현**이었다. `StubBackend`는 스케일이 아예 없으므로 이 버그를 절대 잡을 수 없는 종류였고, `YoloOnnxBackend`가 들어오고 나서야(위 예측대로) 실전 이미지 기반 테스트로 발견·수정됐다.
 
 ### 3. 스레딩 함정
 
@@ -288,14 +292,16 @@ Phase 1은 이 선을 지켰다(위 §왜 새 클래스인가의 배선 목록).
 
 ### 4. 모델 라이선스 (법적 리스크)
 
-> **⬜ 열림** — Phase 2에서 결정. 아직 어떤 가중치도 저장소에 없다.
+> **✅ 닫힘** (Phase 2) — 결정: 가중치를 아예 싣지 않는다.
 
-Ultralytics YOLOv5/v8 **가중치는 AGPL-3.0**이고, 이 앱의 MIT 라이선스와 **충돌한다.** 대응:
+Ultralytics YOLOv5/v8 **가중치는 AGPL-3.0**이고, 이 앱의 MIT 라이선스와 **충돌한다.** 검토했던 두 대응 중:
 
-- 관대한 라이선스 모델을 싣거나(예: YOLOX / Apache-2.0),
-- **가중치를 아예 싣지 않는다** — 사용자가 설정에서 자기 `.onnx` 경로를 가리키게 한다.
+- 관대한 라이선스 모델을 싣는 방안(예: YOLOX / Apache-2.0)은 채택하지 않았고,
+- **가중치를 아예 싣지 않는 쪽으로 결정됐다** — 사용자가 설정에서 자기 `.onnx` 경로를 가리킨다.
 
-어느 쪽이든 **가중치는 기본 설치에 들어가지 않는다.** 설정 키 `SETTING_MODEL_PATH`(`libs/constants.py:25`)는 후자를 전제로 이미 뚫려 있다.
+`data/models/README.md`가 이 결정과 전체 근거(AGPL-3.0 vs MIT 라이선스 충돌 표, permissive 대안
+목록인 YOLOX/YOLOv6/RT-DETR)를 문서화한다. 가중치는 기본 설치에 들어가지 않으며, 설정 키
+`SETTING_MODEL_PATH`(`libs/constants.py:25`)는 이 결정을 전제로 이미 뚫려 있다.
 
 ### 5. 기본 설치 무게
 

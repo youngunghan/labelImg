@@ -7,15 +7,93 @@
 
 | Metric | Value |
 |---|---|
-| Diff vs upstream | 37 files, **+2,376 / −78** |
-| Core app (`labelImg.py`) | +373 / −19 |
-| New documentation | `docs/` tree: 18 files, ~1,200 lines (Diátaxis: tutorials / how-to / reference / explanation) |
-| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`) |
-| Tests | **25/25 passing** — 15 fork tests added (atomic-move rollback via fault injection, undo, YOLO robustness); suite made environment-independent |
+| Diff vs upstream | 57 files, **+8,785 / −94** |
+| Core app (`labelImg.py`) | +693 / −28 |
+| New documentation | `docs/` tree: 21 files, ~2,038 lines (Diátaxis: tutorials / how-to / reference / explanation) |
+| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`); optional `pip install labelImg[ai]` extra |
+| Tests | **218/218 passing**, 12 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
 | Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
-| CI | GitHub Actions: test matrix (Linux/Windows × Py3.9/3.12, headless Qt) + ruff critical-rules lint |
+| CI | GitHub Actions: 3 jobs — core test matrix (Linux/Windows × Py3.9/3.12, headless Qt, base install only), `test-ai` (base + `[ai]` extra, exercises the ONNX-dependent tests), ruff critical-rules lint |
 
 ## Features added
+
+### AI-assisted auto-labeling (`Ctrl+I` / `Ctrl+Return` / `Ctrl+Backspace`)
+
+Upstream labelImg has no model-in-the-loop assist at all — every box is drawn by hand.
+This fork adds one, behind a seam designed so the UI never has to know which model is
+underneath (`libs/inference/backend.py`'s `ModelBackend` ABC — `predict`/`segment`/`embed`
+plus capability flags):
+
+- **`libs/inference/`** is a zero-dependency core: `types.py` (`Detection`, `Mask`,
+  `SegPrompt`, `Prediction`, `least_confidence` for future active learning),
+  `backend.py`, `stub.py` (a deterministic `StubBackend` that drives most of the test
+  suite with no model file and no `onnxruntime`), `registry.py` (`build_backend`).
+  `import libs.inference` pulls in no numpy, no onnxruntime, no Qt.
+- **`libs/inference/yolo_onnx.py`** — the first real backend: ONNX YOLOv5/v8 detection
+  via `onnxruntime`. Aspect-preserving letterbox preprocessing with whole-pixel pads (a
+  single `_letterbox_geometry()` feeds both the forward paste and the inverse mapping,
+  so boxes land back on original image pixels exactly — see the bug table below for what
+  happens when forward/inverse compute this twice). Autodetects the YOLOv5
+  `(1,N,5+nc)` and YOLOv8 `(1,4+nc,N)` export layouts from the output shape and **fails
+  loudly** rather than guessing when a shape is ambiguous. Class-aware NMS (a "person"
+  and the backpack they're wearing don't suppress each other). Pipeline order is
+  decode → confidence filter → NMS → inverse-letterbox, with NMS run in model-input
+  space on purpose.
+- **`libs/inference/service.py`** — `InferenceService` runs the model on a single-worker
+  `QThreadPool` so a slow prediction never blocks the UI thread; workers see only plain
+  data (no `QImage` crosses the thread boundary), results come back as queued Qt
+  signals, and every result is tagged with the image path it was computed for so
+  navigating away mid-inference can't deposit boxes on the wrong image.
+- **`libs/assist/`** — `AssistController`, the one object `MainWindow` delegates AI
+  behaviour to (construction, menu wiring, and one filter at the save choke point is
+  all `MainWindow` itself does). A new **AI menu** adds *Auto-label Image* (`Ctrl+I`),
+  *Accept All* (`Ctrl+Return`), *Reject All* (`Ctrl+Backspace`), and a confidence
+  threshold slider that **re-filters on-screen suggestions without re-running the
+  model** (the backend is asked for everything at `conf_threshold=0.0`; the slider is a
+  pure display filter).
+- **`libs/shape.py`** gained `provisional` / `confidence` / `shape_type`. A
+  model's guess is drawn dashed and translucent and is **never written to disk** — one
+  filter at the single save choke point (`save_labels`, `labelImg.py:1040`) drops every
+  provisional shape, so accepting one is exactly "clear the flag" and every existing
+  VOC/YOLO/CreateML/COCO writer stays byte-for-byte the same for real annotations.
+- **No model weights ship with this fork.** Ultralytics YOLOv5/v8 weights are
+  AGPL-3.0 and would conflict with this MIT app (see `data/models/README.md` for the
+  full reasoning and permissive alternatives such as YOLOX/Apache-2.0). The user points
+  the model-path setting at their own `.onnx` file. `pip install labelImg[ai]` pulls in
+  `onnxruntime>=1.15` + `numpy`; the base install stays `pyqt5`+`lxml` and ships with
+  no backend configured at all, so the AI menu stays disabled (with an install/configure
+  hint) until both the extra is installed and a model backend/path are set — installing
+  the extra by itself is not enough.
+
+### COCO import/export (dataset-level lane)
+
+The other most-requested gap: upstream ships VOC, YOLO and CreateML but no COCO. COCO
+doesn't fit the per-image-sidecar model the other three formats use — **a COCO dataset
+is one JSON covering many images** — so it's wired in as its own lane rather than a
+fourth `<stem>.json` writer:
+
+- `libs/coco_io.py` — `COCOReader`/`COCOWriter`. The default dataset target is
+  `<save dir>/annotations.json`; explicit *Import COCO...* / *Export COCO...*
+  File-menu commands let you point at a different file. Saving does a
+  read-modify-write merge: the current image's `images[]`/`annotations[]` entries are
+  replaced in place, every other image's entries are left untouched.
+- Images are keyed by their path **relative to the dataset JSON**, not by bare
+  basename — `train/0001.jpg` and `val/0001.jpg` are recognised as different images
+  even though labelImg's recursive directory scan can put both in view at once (see
+  the bug table below for what basename-keying used to do).
+- `bbox` is `[x, y, w, h]`, `area = w*h`, `iscrowd = 0`; `category_id`↔name mapping is
+  stable across merges (existing ids are never renumbered, so re-saving doesn't
+  relabel annotations already in the file).
+- Both COCO and CreateML use the `.json` extension, so every load site content-sniffs
+  before picking a reader: a top-level dict with `images`/`annotations`/`categories`
+  is COCO, a top-level list is CreateML.
+- COCO has no schema slot for `difficult` or `verified` — both are dropped on write
+  and read back `False`; the app posts a status-bar note when this happens rather than
+  losing the flag silently.
+- COCO is **not** wired into per-image autosave in the sense of writing a
+  `<stem>.json` sidecar — it never does that — but `Ctrl+S`/Save As/next-prev
+  autosave/verify all merge into the same dataset file, so "I saved but the box isn't
+  there" can't happen either.
 
 ### Good/Bad image triage (`g` / `b` / `Ctrl+Z`) — ~200 LOC
 
@@ -68,14 +146,34 @@ Single Class Mode moved from `Ctrl+Shift+S` — which upstream double-bound to
 | 5 | Multi-image CreateML files showed another image's *verified* badge | reader always took `verified` from the first JSON entry | read it from the entry matching the current image |
 | 6 | Non-ASCII labels could mangle or crash on locale-encoded systems (e.g. cp949) | `classes.txt` and CreateML JSON were read/written with the OS default encoding | all six I/O call sites fixed to UTF-8 |
 
+## Defects caught by cross-engine review before merge
+
+The AI-assist work (COCO IO + `libs/inference/` + `libs/assist/`) went through a
+second-engine (Codex/GPT) review pass before each phase merged. Listed here — not
+because these are upstream bugs, but because they're a fair sample of what that review
+process is actually worth catching:
+
+| # | Symptom | Root cause | Fix | Where |
+|---|---|---|---|---|
+| 1 | A plain "Delete RectBox" on an AI suggestion, followed by a threshold-slider move, aborts the app with an unhandled `ValueError` inside a Qt slot | `AssistController` tracked which shapes were suggestions in its own dict, treating it as ground truth for "what's on the canvas"; an ordinary delete left a stale reference that the next re-filter tried to remove a second time | `provisional_shapes()` now reads the canvas directly instead of the tracking dict; every shape removal (not just ones the controller itself triggered) is reported back via `discard_shape` | `libs/assist/controller.py`, `a32acd3` |
+| 2 | Two images sharing a basename in different subfolders (`train/0001.jpg`, `val/0001.jpg`) silently cross-contaminate each other's boxes in the shared COCO dataset json | `images[]` entries were keyed on bare basename; labelImg scans directories recursively, so both images collapsed onto one dataset entry and their annotations were unioned on read | images are keyed on the path relative to the dataset json (`dataset_relative_name`), with a guarded one-candidate-only migration for datasets written by other tools | `libs/coco_io.py`, `a32acd3` |
+| 3 | Every detected box lands ~0.6–0.8px off in the original image on any image whose letterbox padding is an odd number of pixels | the forward preprocessing rounded the pad to a whole pixel for the actual array paste, while the inverse mapping subtracted the unrounded float pad — a half-model-pixel bias that a self-consistency round-trip test couldn't catch (it only checked the inverse against itself, never against the numpy paste) | forward paste and inverse mapping now derive from one `_letterbox_geometry()` call, so they cannot disagree; new tests read the paste offset off the actual tensor | `libs/inference/yolo_onnx.py`, `c2ecf8e` |
+
+Two more come from the same review passes and are handled the same way (`load_labels`
+appending instead of clearing on `Import COCO...`, and the `setup.py` support floor
+disagreeing with the `dataclass`/`from __future__ import annotations` code it declares
+support for) — see `a32acd3`'s commit message for the full list.
+
 ## Documentation added
 
 Upstream shipped no developer docs. This fork adds a `docs/` tree (Korean, Diátaxis):
-1 tutorial, 8 how-to guides, 4 reference pages (byte-level format specs, module
-inventory, full shortcut table, settings keys), 3 explanations (architecture,
-canvas interaction model, annotation-format design), plus an `llms.txt` routing map.
-Every factual claim was audited against the code (multi-agent audit, 2026-07;
-34 confirmed corrections applied).
+1 tutorial, 10 how-to guides (including new COCO-annotation and auto-labeling guides
+added alongside this work), 4 reference pages (byte-level format specs, module
+inventory, full shortcut table, settings keys), 4 explanations (architecture,
+canvas interaction model, annotation-format design, and the ML-assist design doc
+added alongside the AI work, kept current through both merged phases), plus an
+`llms.txt` routing map. Every factual claim was audited against the code
+(multi-agent audit, 2026-07; 34 confirmed corrections applied in the initial pass).
 
 ## Roadmap — candidate improvements
 
@@ -86,7 +184,7 @@ Effort: **S** small / **M** medium / **L** large.
 
 1. ~~**[M] YOLO reader crash-safety**~~ — **done (2026-07-07)**: missing `classes.txt`
    raises `YoloParseError` → error dialog; malformed lines are skipped and counted
-   (`libs/yolo_io.py:104-168`, `labelImg.py:2012-2024`), with regression tests.
+   (`libs/yolo_io.py:104-168`, `labelImg.py:2189-2209`), with regression tests.
 2. ~~**[S] Consistent text encodings**~~ — **done (2026-07-08)**: all YOLO and
    CreateML I/O call sites now read/write UTF-8; non-ASCII labels round-trip
    (regression-tested with Korean labels).
@@ -97,7 +195,7 @@ Effort: **S** small / **M** medium / **L** large.
 5. **[S] Working *Reset All* restart** — `QProcess.startDetached(__file__)` can't work on
    Windows or in the frozen exe; use `sys.executable`.
 6. **[S] Revisit the 1-px minimum-coordinate clamp** — boxes drawn at the image edge are
-   silently shifted from 0 to 1 on save (VOC/YOLO path, `labelFile.py:168-172`), a
+   silently shifted from 0 to 1 on save (VOC/YOLO path, `libs/labelFile.py:196-203`), a
    2015-era faster-rcnn workaround that degrades edge annotations.
 
 ### Triage workflow
@@ -138,3 +236,28 @@ Effort: **S** small / **M** medium / **L** large.
     tops the fork section. Badge fixed 2026-07-07. Upstream-hot-linked demo
     images remain to be re-pointed.
 19. **[L] Qt6 migration (PySide6)** — after tests and dead-code removal land.
+
+### AI-assisted labeling
+
+20. ~~**[L] COCO import/export**~~ — **done (2026-07-13)**: dataset-level Import/Export
+    COCO... lane, content-sniffed against CreateML at every `.json` load site
+    (`libs/coco_io.py`, `6b48a38`).
+21. ~~**[L] Model-in-the-loop assist**~~ — **done (2026-07-13/14)**: `ModelBackend` seam +
+    `InferenceService` + `AssistController` + provisional shapes shipped Phase 1
+    (`6b48a38`, hardened in `a32acd3`); the real `YoloOnnxBackend` (ONNX YOLOv5/v8 via
+    `onnxruntime`) and the optional `[ai]` extra shipped Phase 2 (`d324e41`, letterbox
+    fix `c2ecf8e`).
+22. **[M] Auto-label Folder** — batch-run the model across every image in the current
+    directory instead of one image at a time; the scoring function for prioritising the
+    results (`least_confidence`, `libs/inference/types.py`) already exists but has no
+    caller yet.
+23. **[S/M] Active learning (uncertainty-sorted review queue)** — reorder `m_img_list` by
+    `least_confidence` after a folder-wide inference pass, so the images the model is
+    least sure about surface first; scaffolded, not wired in.
+24. **[L] Polygon / keypoint annotation modes** — `Shape.shape_type` exists as a label
+    but the rectangle assumption is still load-bearing throughout `Canvas`
+    (4-point vertex arithmetic, bbox-reducing writers); this is the most expensive
+    remaining rework, not a one-field change.
+25. **[L] MobileSAM prompt-based segmentation** — `ModelBackend.segment()`/`embed()` are
+    already declared on the ABC and `InferenceService` already has a per-image embedding
+    cache slot; no segmentation backend implements them yet.

@@ -10,9 +10,11 @@
 | `Ctrl+U` | 디렉터리 열기(Open Dir) — 모든 이미지 로드 |
 | `Ctrl+R` | 기본 어노테이션 저장 디렉터리 변경 |
 | `Ctrl+Shift+O` | 어노테이션 파일 열기 |
+| (메뉴 전용) | **File > Import COCO...** — COCO 데이터셋 json을 골라 현재 이미지의 박스를 불러옴(`labelImg.py:257-258, 2264`) |
+| (메뉴 전용) | **File > Export COCO...** — COCO 데이터셋 json을 골라(또는 새로 만들어) 현재 이미지를 병합 저장(`labelImg.py:259-260, 2293`) |
 | `Ctrl+S` | 저장 |
 | `Ctrl+Shift+S` | 다른 이름으로 저장(Save As) |
-| `Ctrl+Y` | 저장 포맷 전환(PascalVOC→YOLO→CreateML 순환) |
+| `Ctrl+Y` | 저장 포맷 전환(PascalVOC→YOLO→CreateML→COCO 순환, `labelImg.py:651-661`) |
 | `Ctrl+W` | 현재 파일 닫기 |
 | `Ctrl+Shift+D` | 현재 이미지 삭제 |
 | `d` / `a` | 다음 / 이전 이미지 |
@@ -60,6 +62,19 @@
 | `Ctrl+L` | 박스 선 색 변경(Box Line Color) |
 | `Ctrl+Shift+E` | 사전 정의 클래스 편집(영구 저장) |
 | `Ctrl+J` | Edit 모드(고급 모드의 분리 액션) |
+
+## AI (모델 보조 라벨링, `&AI` 메뉴)
+
+구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:228-253`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
+
+| 키 | 동작 |
+|---|---|
+| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:57, 140-143`) |
+| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:58, 144-147`) |
+| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:59, 148-151`) |
+| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:159-191, 246-263`) |
+
+> 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1040`) → [formats.md](formats.md) · [modules.md](modules.md).
 
 ## ⚠️ 이미지 분류 (파일 이동 — 주의)
 

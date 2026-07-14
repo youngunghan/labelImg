@@ -1,4 +1,5 @@
 import os
+import pickle
 import sys
 import tempfile
 import unittest
@@ -19,6 +20,7 @@ from PyQt5.QtGui import QImage
 
 from labelImg import get_main_app
 from libs.assist.suggestion import detection_to_shape
+from libs.constants import SETTING_MODEL_BACKEND
 from libs.inference.service import RawImage, SynchronousExecutor, to_model_image
 from libs.inference.stub import StubBackend, image_size
 from libs.inference.types import Detection
@@ -365,12 +367,21 @@ class TestNoBackend(AssistTestCase):
 
     def test_ai_actions_are_disabled_with_a_hint(self):
         self.assertFalse(self.win.assist.is_available())
+        # No SETTING_MODEL_BACKEND was ever written to settings, so this is the
+        # "nothing configured" cause specifically (DEFAULT_BACKEND is None) --
+        # not "a backend was named but failed to build". The hint text must
+        # match: still updated (not left asserting the pre-fix string), because
+        # the two causes now say different things (see
+        # AssistController._unavailable_hint).
+        self.assertIsNone(self.win.assist.backend_name)
         # An image IS loaded, so toggle_actions has already run and enabled every
         # onLoadActive action — the controller has to win that argument.
         self.assertTrue(self.win.file_path)
         for action in self.win.assist_actions:
             self.assertFalse(action.isEnabled(), action.text())
-            self.assertIn('labelImg[ai]', action.toolTip())
+            tooltip = action.toolTip()
+            self.assertIn('labelImg[ai]', tooltip)
+            self.assertIn('No model backend configured', tooltip)
 
     def test_auto_label_without_a_backend_does_not_crash(self):
         self.assertFalse(self.win.assist.auto_label_image())
@@ -391,6 +402,98 @@ class TestNoBackend(AssistTestCase):
 
         xml_path = os.path.splitext(self.win.file_path)[0] + '.xml'
         self.assertTrue(os.path.isfile(xml_path))
+
+
+class TestBackendConfiguredButUnavailable(AssistTestCase):
+    """SETTING_MODEL_BACKEND names something real (e.g. 'yolo_onnx'), but
+    build_backend still answers None -- missing extras, or extras present with
+    a bad/missing SETTING_MODEL_PATH. This is a DIFFERENT cause than a fresh
+    install with nothing configured (TestNoBackend), and must not be reported
+    with the same "nothing configured" hint: that would be actively misleading
+    to a user who already picked a backend."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = os.path.join(self.tmp.name, 'photos')
+        os.makedirs(self.dir)
+        img = QImage(IMAGE_SIZE, IMAGE_SIZE, QImage.Format_RGB32)
+        img.fill(0xffffffff)
+        img.save(os.path.join(self.dir, 'a.png'))
+
+        # Pre-seed the settings pickle so the real Settings().load() call inside
+        # MainWindow.__init__ sees an explicit backend choice, exactly like a
+        # user who configured one -- rather than mocking backend_name directly.
+        settings_path = os.path.join(self.tmp.name, '.labelImgSettings.pkl')
+        with open(settings_path, 'wb') as handle:
+            pickle.dump({SETTING_MODEL_BACKEND: 'yolo_onnx'}, handle,
+                       pickle.HIGHEST_PROTOCOL)
+
+        self.win = None
+        with mock.patch('libs.assist.controller.build_backend', return_value=None):
+            with mock.patch('os.path.expanduser', return_value=self.tmp.name):
+                self.app, self.win = get_main_app([sys.argv[0], self.dir])
+        self.win.settings.path = os.path.join(self.tmp.name, 'settings.pkl')
+        self.errors = []
+        self.win.error_message = lambda title, msg: self.errors.append((title, msg))
+
+    def test_hint_names_the_configured_backend_not_a_missing_config(self):
+        self.assertEqual('yolo_onnx', self.win.assist.backend_name)
+        self.assertFalse(self.win.assist.is_available())
+        for action in self.win.assist_actions:
+            self.assertFalse(action.isEnabled(), action.text())
+            tooltip = action.toolTip()
+            self.assertIn('labelImg[ai]', tooltip)
+            self.assertIn('yolo_onnx', tooltip, 'hint must name the backend that failed')
+            self.assertNotIn('No model backend configured', tooltip,
+                             'a configured-but-broken backend is not the same as '
+                             'nothing being configured')
+
+
+class TestDefaultConstructionHasNoBackend(unittest.TestCase):
+    """REGRESSION, end-to-end and unmocked: a fresh install (no settings file,
+    SETTING_MODEL_BACKEND never set) must come up with AI disabled.
+
+    Unlike TestNoBackend (which patches libs.assist.controller.build_backend to
+    return None directly) and the AssistTestCase idiom (whose launch() always
+    calls self.win.assist.set_backend(...) right after construction, overriding
+    whatever the constructor built), this test does neither: it drives the real
+    AssistController.__init__ -> build_backend -> registry path with nothing
+    stubbed out. On a machine with numpy+onnxruntime installed (this one), the
+    only thing that can make is_available() False here is DEFAULT_BACKEND being
+    None -- if that regresses back to 'stub', this test builds a real
+    StubBackend and fails.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = os.path.join(self.tmp.name, 'photos')
+        os.makedirs(self.dir)
+        img = QImage(IMAGE_SIZE, IMAGE_SIZE, QImage.Format_RGB32)
+        img.fill(0xffffffff)
+        img.save(os.path.join(self.dir, 'a.png'))
+
+        self.win = None
+        # No mock.patch on build_backend anywhere in this setUp: the settings
+        # pickle simply does not exist at the patched expanduser() target, so
+        # Settings().load() leaves self.data == {} and SETTING_MODEL_BACKEND is
+        # genuinely unset -- exactly a fresh install.
+        with mock.patch('os.path.expanduser', return_value=self.tmp.name):
+            self.app, self.win = get_main_app([sys.argv[0], self.dir])
+        self.win.settings.path = os.path.join(self.tmp.name, 'settings.pkl')
+        self.errors = []
+        self.win.error_message = lambda title, msg: self.errors.append((title, msg))
+
+    def tearDown(self):
+        self.win.dirty = False
+        self.win.close()
+        self.tmp.cleanup()
+
+    def test_fresh_install_has_no_backend_and_ai_actions_disabled(self):
+        self.assertIsNone(self.win.assist.backend_name)
+        self.assertFalse(self.win.assist.is_available())
+        self.assertIsNone(self.win.inference_service.backend())
+        for action in self.win.assist_actions:
+            self.assertFalse(action.isEnabled(), action.text())
 
 
 class TestOutOfBandRemoval(AssistTestCase):

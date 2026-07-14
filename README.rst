@@ -56,6 +56,26 @@ carries them independently.
 
 What this fork adds on top of upstream ``b33f965``:
 
+- **AI-assisted auto-labeling** (``Ctrl+I`` / ``Ctrl+Return`` / ``Ctrl+Backspace``,
+  new **AI** menu) — run an ONNX YOLOv5/v8 detector on the current image and get
+  provisional (dashed) suggestion boxes back; reject any suggestion individually
+  (``Delete``), or accept or reject all of them at once (per-box accept is not yet
+  implemented — see the roadmap), with a confidence-threshold slider that re-filters
+  suggestions on screen without re-running the model. Inference runs on a
+  background thread, so it never blocks the UI, and a suggestion is never written
+  to disk until you accept it. Requires the optional ``labelImg[ai]`` extra
+  (``pip install labelImg[ai]``, adds ``onnxruntime`` + ``numpy``) and a model file
+  you supply yourself — see `data/models/README.md <data/models/README.md>`__ for
+  why no weights ship with this MIT-licensed app (Ultralytics YOLOv5/v8 weights are
+  AGPL-3.0) and for permissively-licensed alternatives. Without the extra and a
+  configured model, the AI menu stays greyed out and the rest of the app is
+  unaffected.
+- **COCO import/export** (*File > Import COCO...* / *Export COCO...*) — a fourth
+  annotation format alongside PASCAL VOC/YOLO/CreateML. Unlike those three, COCO
+  is dataset-level (one JSON describes many images), so it is not a per-image
+  save format you switch to — it is an explicit Import/Export lane that merges the
+  current image into a shared dataset ``.json`` (``annotations.json`` in the save
+  directory by default) without disturbing any other image's entries.
 - **Good/Bad image triage** — press ``g``/``b`` to move the current image *and*
   its label file into a ``<folder>_good`` / ``<folder>_bad`` sibling folder and
   advance to the next image. Moves are atomic (rolled back if a label move
@@ -74,8 +94,8 @@ What this fork adds on top of upstream ``b33f965``:
   crashes on a standalone (Open File) image; saving with an unsupported format
   raises a clear error instead of an ``AttributeError``.
 - **Developer documentation** — a `docs/ <docs/README.md>`__ tree (Korean)
-  covering architecture, annotation formats, shortcuts and the fork features,
-  plus a PyInstaller ``labelImg.spec``.
+  covering architecture, annotation formats, the ML-assist design, shortcuts
+  and the fork features, plus a PyInstaller ``labelImg.spec``.
 
 The PyPI package (``pip3 install labelImg``) is the upstream project and does
 not include these changes — build from source to use them.
@@ -93,9 +113,10 @@ Get from PyPI but only python3.0 or above
 This is the simplest (one-command) install method on modern Linux distributions such as Ubuntu and Fedora.
 
 Note: the PyPI package is the upstream labelImg and does NOT include this
-fork's additions (g/b classify, Ctrl+Z undo classify, Ctrl+Shift+E class
-editing, Ctrl+Shift+C single-class-mode shortcut). To use this fork, build
-from source in this repository instead.
+fork's additions (AI-assisted auto-labeling, COCO import/export, g/b classify,
+Ctrl+Z undo classify, Ctrl+Shift+E class editing, Ctrl+Shift+C
+single-class-mode shortcut). To use this fork, build from source in this
+repository instead.
 
 .. code:: shell
 
@@ -111,6 +132,21 @@ Linux/Ubuntu/Mac requires at least `Python
 2.6 <https://www.python.org/getit/>`__ and has been tested with `PyQt
 4.8 <https://www.riverbankcomputing.com/software/pyqt/intro>`__. However, `Python
 3 or above <https://www.python.org/getit/>`__ and  `PyQt5 <https://pypi.org/project/PyQt5/>`__ are strongly recommended.
+
+This fork requires **Python 3.7+** (``labelImg.py`` imports the AI-assist core at
+module load time, and that core uses dataclasses and postponed annotation
+evaluation, both 3.7+ features — this applies even if you never use the AI menu).
+The AI-assisted auto-labeling *model backend* itself is an additional, optional
+extra on top of the ``pyqt5``/``lxml`` base install below:
+
+.. code:: shell
+
+    pip install labelImg[ai]   # adds onnxruntime>=1.15 and numpy
+
+No model weights ship with labelImg — point the ``model/path`` setting at your
+own ``.onnx`` file (see `data/models/README.md <data/models/README.md>`__).
+Without this extra and a configured model, labelImg still runs as a normal
+annotation tool; the AI menu is simply greyed out.
 
 
 Ubuntu Linux
@@ -340,11 +376,23 @@ Hotkeys
 +--------------------+--------------------------------------------+
 | Ctrl + Shift + e   | Edit default classes in-app (fork)         |
 +--------------------+--------------------------------------------+
+| Ctrl + I           | Auto-label current image (fork)            |
++--------------------+--------------------------------------------+
+| Ctrl + Return      | Accept all AI suggestions (fork)           |
++--------------------+--------------------------------------------+
+| Ctrl + Backspace   | Reject all AI suggestions (fork)           |
++--------------------+--------------------------------------------+
 
 g / b / Ctrl+Z are fork-specific classify hotkeys: the current image and its
 label file (.xml / .txt / .json) are moved to a sibling ``<folder>_good`` /
 ``<folder>_bad`` directory, then the next image is loaded; Ctrl+Z undoes the
 last move.
+
+Ctrl+I / Ctrl+Return / Ctrl+Backspace are fork-specific AI-assist hotkeys: run
+the model on the current image, accept every suggestion it made, or reject
+every suggestion it made. There is also a confidence-threshold slider in the
+new **AI** menu that re-filters suggestions on screen without re-running the
+model.
 
 **Verify Image:**
 

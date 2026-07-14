@@ -34,7 +34,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BACKEND = 'stub'
+DEFAULT_BACKEND = None
 
 # A factory takes the config mapping and returns a constructed backend.  It may
 # raise MissingDependency / ImportError -- build_backend absorbs both.
@@ -129,13 +129,28 @@ def build_backend(config: Optional[Mapping[str, Any]] = None) -> Optional[ModelB
         {'backend': 'stub', 'model_path': ..., 'conf_threshold': 0.25}
     Unknown keys are ignored, so callers can pass a superset.
 
-    Returns ``None`` -- never raises -- when the backend is unknown, its
-    optional dependencies are missing, or its construction fails (e.g. the model
-    file on ``model_path`` is absent or corrupt).  Every one of those is a
-    "run labelImg without AI" situation, not a crash.
+    Returns ``None`` -- never raises -- when no backend was requested, the
+    backend is unknown, its optional dependencies are missing, or its
+    construction fails (e.g. the model file on ``model_path`` is absent or
+    corrupt).  Every one of those is a "run labelImg without AI" situation, not
+    a crash.
+
+    ``DEFAULT_BACKEND`` is ``None``: a fresh install with no
+    ``SETTING_MODEL_BACKEND`` configured must not silently light up an AI
+    feature nobody asked for (``stub`` fabricates detections from the image's
+    dimensions -- see ``libs/inference/stub.py`` -- and a user could easily
+    mistake those for a real model's output). ``stub`` stays fully registered
+    and fully functional as an explicit, opt-in choice; it is just no longer
+    what an unconfigured caller gets.
     """
     config = config or {}
     name = config.get('backend') or DEFAULT_BACKEND
+
+    if name is None:
+        # No backend requested -- distinct from a typo'd/unknown name below,
+        # which is a configuration mistake worth a warning. This is not one:
+        # it is the ordinary, expected state of an unconfigured install.
+        return None
 
     factory = _BACKENDS.get(name)
     if factory is None:

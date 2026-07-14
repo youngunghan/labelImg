@@ -61,6 +61,16 @@ g/good·b/bad는 **기본값**일 뿐이다. **File > Edit Classify Categories**
 
 `Edit → Box Line Color`(`Ctrl+L`, `choose_color1`)는 색상 다이얼로그(알파 채널·Restore Defaults)로 박스 선 색을 바꾸고 설정에 영속화한다(`SETTING_LINE_COLOR`). 선택한 박스의 선/채움 색은 고급 모드의 Shape Line/Fill Color 액션으로 따로 바꿀 수 있다.
 
+## AI 자동 라벨링 (`&AI` 메뉴)
+
+모델이 이미지를 보고 박스를 **제안**하고, 사람이 받아들이거나 버리는 기능이다(이 포크에서 추가). 새
+**AI 메뉴**에 `Auto-label Image`(`Ctrl+I`)·`Accept All Suggestions`(`Ctrl+Return`)·
+`Reject All Suggestions`(`Ctrl+Backspace`)와 신뢰도 임계값 슬라이더가 있다(`AssistController`,
+`libs/assist/controller.py`). 제안은 점선/반투명으로 표시되며 **받아들이기 전까지는 저장되지 않는다**.
+기본 설치는 백엔드가 전혀 설정되지 않은 상태라 **메뉴 자체가 비활성화**돼 있다(설치/설정 안내
+툴팁만 뜬다) — 실제 ONNX 모델로 검출하려면 `pip install labelImg[ai]`와 모델 백엔드/경로 설정이
+모두 필요하다. 전체 절차 → [auto-label.md](auto-label.md).
+
 ## 보기/탐색
 
 - **Fit Window** `Ctrl+F` · **Fit Width** `Ctrl+Shift+F` · **원본 크기(100%)** `Ctrl+=` (`labelImg.py:347-354`).
