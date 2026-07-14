@@ -25,7 +25,7 @@
 | [how-to/annotate-yolo.md](how-to/annotate-yolo.md) | YOLO(txt + classes.txt) 라벨링 절차와 주의점 |
 | [how-to/annotate-createml.md](how-to/annotate-createml.md) | CreateML(JSON) 라벨링 절차 |
 | [how-to/annotate-coco.md](how-to/annotate-coco.md) | COCO(JSON) 라벨링 절차 — 4번째 포맷, 이미지별 사이드카가 아니라 데이터셋 json 하나(Import/Export COCO...) |
-| [how-to/auto-label.md](how-to/auto-label.md) | AI 자동 라벨링(Auto-label) — Ctrl+I로 제안, Accept/Reject, 신뢰도 슬라이더, `pip install labelImg[ai]` |
+| [how-to/auto-label.md](how-to/auto-label.md) | AI 자동 라벨링(Auto-label) — Ctrl+I로 제안, Accept/Reject, 신뢰도 슬라이더, `pip install -e ".[ai]"`(로컬 체크아웃) |
 | [how-to/verify-and-difficult.md](how-to/verify-and-difficult.md) | verify 플래그·difficult·single-class/use-default-label·auto-save·정사각형 그리기 |
 | [how-to/more-features.md](how-to/more-features.md) | ⚠️이미지 분류(g/b 파일이동)·이전 박스 복사(Ctrl+V)·클래스 편집·고급 모드·밝기·박스 색 |
 | [how-to/export-to-csv.md](how-to/export-to-csv.md) | `tools/label_to_csv.py`로 VOC/YOLO → AutoML CSV 변환 |

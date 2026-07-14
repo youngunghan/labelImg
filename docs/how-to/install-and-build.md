@@ -24,11 +24,10 @@ labelImg
 labelImg [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 ```
 
-AI 자동 라벨링까지 실제 ONNX 모델로 쓰려면 `[ai]` extra를 함께 설치한다:
-
-```shell
-pip3 install labelImg[ai]
-```
+> ⚠️ 이 PyPI 패키지는 업스트림 `labelImg`이며 **이 포크의 기능(AI 자동 라벨링, COCO
+> 가져오기/내보내기 등)을 전혀 포함하지 않는다** — `[ai]` extra를 추가로 설치해도
+> 업스트림 패키지에는 애초에 이 포크의 AI 코드가 없으므로 아무 의미가 없다. AI 자동
+> 라벨링을 포함한 이 포크의 기능을 쓰려면 아래 **B. 소스에서 실행**을 따라야 한다.
 
 ## B. 소스에서 실행
 
@@ -59,6 +58,19 @@ pyrcc5 -o libs/resources.py resources.qrc     # PyQt5는 pyrcc5 (pyrcc4 아님)
 python labelImg.py
 python labelImg.py [IMAGE_PATH] [PRE-DEFINED CLASS FILE] [SAVE_DIR]
 ```
+
+### AI 자동 라벨링 extra (선택)
+
+실제 ONNX 모델로 추론하려면(`[ai]` extra: `onnxruntime`+`numpy`), 위 세 플랫폼 어디서든 이
+저장소 루트에서 다음을 실행한다:
+
+```shell
+pip install -e ".[ai]"
+```
+
+이 포크는 PyPI에 `labelImg`라는 이름으로 배포되어 있지 **않다** — `pip3 install
+labelImg[ai]`(A절)를 실행하면 이 저장소와 무관한 업스트림 패키지를 받게 되므로, extra는
+반드시 위처럼 로컬 체크아웃에서 설치해야 한다. 자세한 사용법은 [auto-label.md](auto-label.md).
 
 > `make qt5py3`이 하는 일은 한 줄이다(`Makefile:23-24`): `pyrcc5 -o libs/resources.py resources.qrc`. 이 `libs/resources.py`(약 654KB 자동생성)가 없으면 아이콘·문자열 로딩이 실패한다.
 

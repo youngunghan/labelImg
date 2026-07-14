@@ -65,14 +65,14 @@
 
 ## AI (모델 보조 라벨링, `&AI` 메뉴)
 
-구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:228-253`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
+구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:238-275`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
 
 | 키 | 동작 |
 |---|---|
-| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:57, 140-143`) |
-| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:58, 144-147`) |
-| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:59, 148-151`) |
-| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:159-191, 246-263`) |
+| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:57, 173-176`) |
+| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:58, 177-180`) |
+| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:59, 181-184`) |
+| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:196-228, 295-312`) |
 
 > 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1040`) → [formats.md](formats.md) · [modules.md](modules.md).
 

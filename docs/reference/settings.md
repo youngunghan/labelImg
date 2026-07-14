@@ -40,8 +40,8 @@ labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pk
 | `SETTING_LABEL_FILE_FORMAT` | `labelFileFormat` | 마지막 사용 포맷(VOC/YOLO/CreateML/COCO) |
 | `SETTING_CLASSIFY_TARGETS` | `classifyTargets` | (포크, 2026-07-08) 분류 카테고리 `(단축키, 폴더이름)` 쌍 목록 — 기본 `[('g','good'),('b','bad')]`. Edit Classify Categories 저장 시 즉시 `save()`되며, closeEvent가 개별 기록하지 않아도 로드된 dict에 남아 종료 시에도 보존된다 |
 | `SETTING_MODEL_BACKEND` | `model/backend` | (포크, ML-assist) 사용할 추론 백엔드 이름(`libs/inference/registry.py`의 등록 키, 예: `'stub'`/`'yolo_onnx'`). `DEFAULT_BACKEND`는 `'stub'`가 아니라 **`None`**이다(`registry.py:37`) — 설정 파일에 이 키가 없으면 **어떤 백엔드도 자동 선택되지 않는다.** 기본 설치는 백엔드 미설정 상태이고 AI 액션은 비활성으로 남는다(`AssistController.__init__`, `libs/assist/controller.py:87`) |
-| `SETTING_MODEL_PATH` | `model/path` | (포크, ML-assist) `yolo_onnx` 백엔드가 로드할 `.onnx` 파일 경로. 기본값 `None`(모델 미설정 → AI 액션 비활성) — `controller.py:74` |
-| `SETTING_CONF_THRESHOLD` | `model/confThreshold` | (포크, ML-assist) AI 메뉴 슬라이더의 신뢰도 임계값(0.0~1.0로 클램프, `AssistController._sanitize_threshold`). 기본값 `DEFAULT_CONF_THRESHOLD=0.5`(`controller.py:46, 75-76`) |
+| `SETTING_MODEL_PATH` | `model/path` | (포크, ML-assist) `yolo_onnx` 백엔드가 로드할 `.onnx` 파일 경로. 기본값 `None`(모델 미설정 → AI 액션 비활성) — `controller.py:88` |
+| `SETTING_CONF_THRESHOLD` | `model/confThreshold` | (포크, ML-assist) AI 메뉴 슬라이더의 신뢰도 임계값(0.0~1.0로 클램프, `AssistController._sanitize_threshold`). 기본값 `DEFAULT_CONF_THRESHOLD=0.5`(`controller.py:46, 89-90`) |
 
 세 키 모두 `constants.py:24-26`에 정의되어 있고, `closeEvent`가 `self.assist.backend_name`/`model_path`/`threshold`를 그대로 기록한다(`labelImg.py:1451-1453`; 백엔드/모델 경로는 아직 고르는 UI가 없어 설정 파일로만 바뀐다는 주석이 붙어 있다, `labelImg.py:1449-1450`).
 

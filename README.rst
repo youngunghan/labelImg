@@ -63,8 +63,10 @@ What this fork adds on top of upstream ``b33f965``:
   implemented — see the roadmap), with a confidence-threshold slider that re-filters
   suggestions on screen without re-running the model. Inference runs on a
   background thread, so it never blocks the UI, and a suggestion is never written
-  to disk until you accept it. Requires the optional ``labelImg[ai]`` extra
-  (``pip install labelImg[ai]``, adds ``onnxruntime`` + ``numpy``) and a model file
+  to disk until you accept it. Requires the optional ``ai`` extra, installed from
+  this checkout (``pip install -e ".[ai]"`` — see *Build from source* below; this
+  fork is not published to PyPI, so ``pip install labelImg[ai]`` would fetch the
+  unrelated upstream package instead; adds ``onnxruntime`` + ``numpy``) and a model file
   you supply yourself — see `data/models/README.md <data/models/README.md>`__ for
   why no weights ship with this MIT-licensed app (Ultralytics YOLOv5/v8 weights are
   AGPL-3.0) and for permissively-licensed alternatives. Without the extra and a
@@ -141,7 +143,12 @@ extra on top of the ``pyqt5``/``lxml`` base install below:
 
 .. code:: shell
 
-    pip install labelImg[ai]   # adds onnxruntime>=1.15 and numpy
+    pip install -e ".[ai]"   # from the repository root; adds onnxruntime>=1.15 and numpy
+
+Note: this fork is not published to PyPI under the ``labelImg`` name, so
+``pip install labelImg[ai]`` would install the unrelated upstream package
+(which has none of this fork's AI code) instead of these extras — always run
+the command above from a checkout of *this* repository.
 
 No model weights ship with labelImg — point the ``model/path`` setting at your
 own ``.onnx`` file (see `data/models/README.md <data/models/README.md>`__).

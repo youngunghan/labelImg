@@ -68,8 +68,9 @@ g/good·b/bad는 **기본값**일 뿐이다. **File > Edit Classify Categories**
 `Reject All Suggestions`(`Ctrl+Backspace`)와 신뢰도 임계값 슬라이더가 있다(`AssistController`,
 `libs/assist/controller.py`). 제안은 점선/반투명으로 표시되며 **받아들이기 전까지는 저장되지 않는다**.
 기본 설치는 백엔드가 전혀 설정되지 않은 상태라 **메뉴 자체가 비활성화**돼 있다(설치/설정 안내
-툴팁만 뜬다) — 실제 ONNX 모델로 검출하려면 `pip install labelImg[ai]`와 모델 백엔드/경로 설정이
-모두 필요하다. 전체 절차 → [auto-label.md](auto-label.md).
+툴팁만 뜬다) — 실제 ONNX 모델로 검출하려면 이 저장소 루트에서 `pip install -e ".[ai]"`(이 포크는
+PyPI 미배포이므로 `pip install labelImg[ai]`는 무관한 업스트림 패키지를 받는다)와 모델 백엔드/경로
+설정이 모두 필요하다. 전체 절차 → [auto-label.md](auto-label.md).
 
 ## 보기/탐색
 

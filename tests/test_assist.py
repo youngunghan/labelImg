@@ -449,6 +449,59 @@ class TestBackendConfiguredButUnavailable(AssistTestCase):
                              'nothing being configured')
 
 
+class TestToolTipRestoredWhenBackendBecomesAvailable(AssistTestCase):
+    """Regression: refresh_actions used to overwrite an action's toolTip and
+    statusTip with the disabled-state hint while the backend was unavailable,
+    but never cleared either once the backend became available again -- the
+    available branch fell back to `action.statusTip()`, which was the very
+    hint this same method had just stamped over the original tip. An ENABLED
+    action could therefore keep showing "No model backend configured" forever.
+
+    AssistTestCase.launch() already drives exactly the transition that
+    triggers this: a fresh install has no default backend (DEFAULT_BACKEND is
+    None), so create_actions()'s first refresh_actions() stamps the hint over
+    every action; launch() then injects a real backend via set_backend(),
+    which must restore each action's own tip -- not leave the hint sitting in
+    statusTip() -- once refresh_actions runs again.
+    """
+
+    def test_status_tip_and_tooltip_are_clean_once_available(self):
+        self.assertTrue(self.win.assist.is_available())
+
+        expected_tips = (
+            (self.win.assist.action_auto,
+             'Run the model on this image and show its boxes as suggestions'),
+            (self.win.assist.action_accept,
+             'Turn every suggestion on this image into a real box'),
+            (self.win.assist.action_reject,
+             'Discard every suggestion on this image'),
+        )
+        for action, expected_tip in expected_tips:
+            self.assertNotIn('No model backend configured', action.statusTip())
+            self.assertNotIn('No model backend configured', action.toolTip())
+            self.assertEqual(expected_tip, action.statusTip())
+            self.assertEqual(expected_tip, action.toolTip())
+
+        # The threshold action never had a tip of its own (it is built by hand
+        # in _create_threshold_action, not through new_action's `tip` kwarg):
+        # once available it must fall back to its text, not to a leftover hint.
+        threshold = self.win.assist.action_threshold
+        self.assertEqual('', threshold.statusTip())
+        self.assertNotIn('No model backend configured', threshold.toolTip())
+        self.assertEqual('Confidence Threshold', threshold.toolTip())
+
+    def test_hint_reappears_if_the_backend_is_dropped_again(self):
+        # The other direction: available -> unavailable must still show the
+        # hint (this half already worked; guard it so the fix does not flip
+        # the bug instead of removing it).
+        self.win.assist.set_backend(None)
+
+        self.assertFalse(self.win.assist.is_available())
+        for action in self.win.assist_actions:
+            self.assertIn('No model backend configured', action.statusTip())
+            self.assertIn('No model backend configured', action.toolTip())
+
+
 class TestDefaultConstructionHasNoBackend(unittest.TestCase):
     """REGRESSION, end-to-end and unmocked: a fresh install (no settings file,
     SETTING_MODEL_BACKEND never set) must come up with AI disabled.

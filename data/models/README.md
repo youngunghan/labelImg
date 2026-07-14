@@ -41,8 +41,10 @@ alternatives below.
       class-id order, same format as `data/predefined_classes.txt`,
    3. `class_0`, `class_1`, ... as a last resort.
 
-If the AI actions stay greyed out, the extras are missing:
-`pip install labelImg[ai]` (onnxruntime + numpy).
+If the AI actions stay greyed out, the extras are missing. This fork is not
+published to PyPI, so install them from this checkout (from the repository
+root, not from `data/models/`):
+`pip install -e ".[ai]"` (onnxruntime + numpy).
 
 ### Exporting from Ultralytics (AGPL-3.0 -- applies to you)
 

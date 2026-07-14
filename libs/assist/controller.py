@@ -113,6 +113,12 @@ class AssistController(QObject):
         self._threshold_slider = None
         self._threshold_value_label = None
         self._actions = []
+        # The tooltip/statusTip each action carries while available (set by
+        # new_action's `tip` argument, or '' for the threshold widget action).
+        # refresh_actions overwrites both with the disabled-state hint while the
+        # backend is unavailable, and must restore exactly this -- not whatever
+        # is left sitting in statusTip() -- once it becomes available again.
+        self._base_tips = {}
 
         self.service.predictionReady.connect(self.on_prediction_ready)
         self.service.predictionFailed.connect(self.on_prediction_failed)
@@ -180,6 +186,10 @@ class AssistController(QObject):
 
         self._actions = [self.action_auto, self.action_accept, self.action_reject,
                          self.action_threshold]
+        # Captured before refresh_actions ever runs, so the very first refresh
+        # (which may find no backend and stamp the hint over everything) still
+        # has the real base tip to restore once a backend becomes available.
+        self._base_tips = {action: action.statusTip() for action in self._actions}
         self.refresh_actions()
         return list(self._actions)
 
@@ -246,11 +256,23 @@ class AssistController(QObject):
             self.action_threshold.setEnabled(available)
 
         # A greyed-out menu with no explanation reads as a bug; say why.
+        #
+        # The unavailable branch below OVERWRITES both toolTip and statusTip with
+        # the hint. If the backend later becomes available, `hint` is '' here --
+        # falling back to action.statusTip() would read back the hint this same
+        # method wrote last time (never cleared), so an ENABLED action would keep
+        # showing "No model backend configured". The available branch must
+        # restore the action's own base tip explicitly, not read whatever is
+        # still sitting in statusTip().
         hint = self._unavailable_hint() if not available else ''
         for action in self._actions:
-            action.setToolTip(hint or action.statusTip() or action.text())
             if hint:
                 action.setStatusTip(hint)
+                action.setToolTip(hint)
+            else:
+                base_tip = self._base_tips.get(action, '')
+                action.setStatusTip(base_tip)
+                action.setToolTip(base_tip or action.text())
 
     # -- threshold ---------------------------------------------------------
 

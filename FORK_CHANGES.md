@@ -10,8 +10,8 @@
 | Diff vs upstream | 57 files, **+8,785 / −94** |
 | Core app (`labelImg.py`) | +693 / −28 |
 | New documentation | `docs/` tree: 21 files, ~2,038 lines (Diátaxis: tutorials / how-to / reference / explanation) |
-| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`); optional `pip install labelImg[ai]` extra |
-| Tests | **218/218 passing**, 12 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
+| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
+| Tests | **223/223 passing**, 12 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
 | Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
 | CI | GitHub Actions: 3 jobs — core test matrix (Linux/Windows × Py3.9/3.12, headless Qt, base install only), `test-ai` (base + `[ai]` extra, exercises the ONNX-dependent tests), ruff critical-rules lint |
 
@@ -59,7 +59,9 @@ plus capability flags):
 - **No model weights ship with this fork.** Ultralytics YOLOv5/v8 weights are
   AGPL-3.0 and would conflict with this MIT app (see `data/models/README.md` for the
   full reasoning and permissive alternatives such as YOLOX/Apache-2.0). The user points
-  the model-path setting at their own `.onnx` file. `pip install labelImg[ai]` pulls in
+  the model-path setting at their own `.onnx` file. `pip install -e ".[ai]"` (run from
+  this checkout — this fork is not on PyPI, so `pip install labelImg[ai]` would fetch
+  the unrelated upstream package) pulls in
   `onnxruntime>=1.15` + `numpy`; the base install stays `pyqt5`+`lxml` and ships with
   no backend configured at all, so the AI menu stays disabled (with an install/configure
   hint) until both the extra is installed and a model backend/path are set — installing
