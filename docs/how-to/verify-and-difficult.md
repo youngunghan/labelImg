@@ -4,7 +4,7 @@
 
 ## Verify(검증) 플래그
 
-`Space`를 누르면 현재 이미지의 **verified 상태가 토글**된다 — 미검증이면 verified로 표시되고, 이미 verified면 해제된다(`toggle_verify`, `labelFile.py:145-146`). verified일 때 캔버스 배경이 **연녹색**으로 바뀐다(`Canvas.paintEvent`, `canvas.py:546-553`). 토글 직후 라벨 파일이 **즉시 저장**되며, 라벨 파일이 없으면 먼저 생성된다(`verify_image`, `labelImg.py:1570-1593`).
+`Space`를 누르면 현재 이미지의 **verified 상태가 토글**된다 — 미검증이면 verified로 표시되고, 이미 verified면 해제된다(`toggle_verify`, `labelFile.py:145-146`). verified일 때 캔버스 배경이 **연녹색**으로 바뀐다(`Canvas.paintEvent`, `canvas.py:546-553`). 토글 직후 라벨 파일이 **즉시 저장**되며, 라벨 파일이 없으면 먼저 생성된다(`verify_image`, `labelImg.py:1621-1644`).
 
 용도: 자동 생성된 데이터셋을 사람이 빠르게 검수할 때, 박스를 새로 그리는 대신 "이 이미지는 확인했다"고 플래그만 찍고 넘어가는 워크플로다.
 

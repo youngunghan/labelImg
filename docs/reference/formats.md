@@ -161,7 +161,7 @@ COCO가 담지 **않는** 것:
 
 `.json` 콘텐츠 스니핑 (COCO vs CreateML):
 
-COCO와 CreateML은 둘 다 확장자가 `.json`이라 확장자만으로는 리더를 고를 수 없다. 그래서 모든 `.json` 로드 경로는 **먼저 파싱한 내용을 살펴** 리더를 정한다 — 최상위가 `images`/`annotations`/`categories` 키를 가진 dict면 COCO, 리스트면 CreateML(`is_coco_dict`, `coco_io.py:82-91`; 파일 단위 래퍼 `is_coco_json`, `coco_io.py:94-102`). 자동 로드 디스패치는 `MainWindow.load_json_by_filename`(`labelImg.py:2231-2241`)이 맡는다(주석: `CreateMLReader`는 디코드 오류만 잡으므로 이 스니핑 없이는 COCO 데이터셋을 조용히 "박스 0개"로 오독했을 것). `load_coco_json_by_filename`(`labelImg.py:2256-2281`)은 데이터셋에 이 이미지가 없으면(`found_image=False`) 포맷을 바꾸지 않고 조용히 물러난다 — 저장 디렉터리에 우연히 있는 COCO 데이터셋이 무관한 이미지들의 포맷까지 바꾸지 않게 하기 위함이다. **Import COCO...** 다이얼로그도 같은 스니핑으로 고른 파일을 검증한다(`import_coco_dialog`, `labelImg.py:2283-2310`).
+COCO와 CreateML은 둘 다 확장자가 `.json`이라 확장자만으로는 리더를 고를 수 없다. 그래서 모든 `.json` 로드 경로는 **먼저 파싱한 내용을 살펴** 리더를 정한다 — 최상위가 `images`/`annotations`/`categories` 키를 가진 dict면 COCO, 리스트면 CreateML(`is_coco_dict`, `coco_io.py:82-91`; 파일 단위 래퍼 `is_coco_json`, `coco_io.py:94-102`). 자동 로드 디스패치는 `MainWindow.load_json_by_filename`(`labelImg.py:2267-2277`)이 맡는다(주석: `CreateMLReader`는 디코드 오류만 잡으므로 이 스니핑 없이는 COCO 데이터셋을 조용히 "박스 0개"로 오독했을 것). `load_coco_json_by_filename`(`labelImg.py:2292-2317`)은 데이터셋에 이 이미지가 없으면(`found_image=False`) 포맷을 바꾸지 않고 조용히 물러난다 — 저장 디렉터리에 우연히 있는 COCO 데이터셋이 무관한 이미지들의 포맷까지 바꾸지 않게 하기 위함이다. **Import COCO...** 다이얼로그도 같은 스니핑으로 고른 파일을 검증한다(`import_coco_dialog`, `labelImg.py:2319-2346`).
 
 ---
 

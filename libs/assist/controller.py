@@ -27,18 +27,20 @@ import logging
 
 try:
     from PyQt5.QtCore import QObject, Qt
-    from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QSlider, QWidget,
-                                 QWidgetAction)
+    from PyQt5.QtGui import QColor, QImageReader
+    from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QListWidgetItem, QSlider,
+                                 QWidget, QWidgetAction)
 except ImportError:  # pragma: no cover - the app's PyQt4 fallback path
     from PyQt4.QtCore import QObject, Qt
-    from PyQt4.QtGui import (QHBoxLayout, QLabel, QSlider, QWidget,
-                             QWidgetAction)
+    from PyQt4.QtGui import (QColor, QHBoxLayout, QImageReader, QLabel,
+                             QListWidgetItem, QSlider, QWidget, QWidgetAction)
 
 from libs.assist.suggestion import detection_to_shape, style_as_committed
 from libs.constants import (SETTING_CONF_THRESHOLD, SETTING_MODEL_BACKEND,
                             SETTING_MODEL_PATH)
 from libs.inference.registry import DEFAULT_BACKEND, build_backend
 from libs.inference.service import to_model_image
+from libs.inference.types import least_confidence
 from libs.utils import generate_color_by_text, new_action
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,16 @@ DEFAULT_CONF_THRESHOLD = 0.5
 SHORTCUT_AUTO_LABEL = 'Ctrl+I'
 SHORTCUT_ACCEPT_ALL = 'Ctrl+Return'
 SHORTCUT_REJECT_ALL = 'Ctrl+Backspace'
+# Phase 4 (active-learning triage). Ctrl+Shift+U is free against the same
+# checked-at-runtime dump as the block above ('U' is not in either the
+# Ctrl+{...} or Ctrl+Shift+{...} taken sets listed there) -- 'U' for
+# "Uncertainty". Score Folder and Restore Order deliberately get NO shortcut:
+# they are one-shot/rare menu actions (a batch scan; an order reset), and
+# every remaining free key is also at the mercy of File > Edit Classify
+# Categories, which lets a user rebind classify actions to arbitrary single
+# keys at runtime -- stacking more static shortcuts into that space buys
+# little for actions nobody needs to reach without the mouse.
+SHORTCUT_SORT_BY_UNCERTAINTY = 'Ctrl+Shift+U'
 
 # Two distinct "AI disabled" causes need two distinct hints (see
 # _unavailable_hint / refresh_actions): nothing was configured at all (fresh
@@ -144,6 +156,46 @@ class AssistController(QObject):
         self._threshold_slider = None
         self._threshold_value_label = None
         self._actions = []
+
+        # -- active-learning triage (Phase 4) -------------------------------
+        # image_path -> uncertainty (0..1, least_confidence of that image's
+        # detections). Populated by a batch scan (score_folder), consumed by
+        # sort_by_uncertainty; belongs to the CURRENTLY SCANNED folder, so a
+        # fresh directory scan clears it (on_directory_scanned) but a
+        # same-directory refresh after a classify/delete/undo move does not
+        # (see import_dir_images' reset_active_learning parameter) -- that
+        # refresh must not throw away the triage order mid-session.
+        self._uncertainty = {}
+        self._ranks_cache = None  # invalidated whenever _uncertainty changes
+        # Filesystem-order snapshot taken at the same moment _uncertainty is
+        # cleared, so "Restore Original Order" has something to restore even
+        # after several sorts.
+        self._original_order = None
+        # True from a successful sort_by_uncertainty() until
+        # restore_original_order() or a fresh directory scan. Lets
+        # reapply_sort_if_active() keep the triage queue in uncertainty order
+        # across the same-directory rescans classify/delete/undo trigger --
+        # see that method's docstring for why this is not optional.
+        self._sort_active = False
+
+        # One batch run at a time; state for the currently running scan (or
+        # all-default/empty when none is running). The single-worker pool
+        # (InferenceService) serialises requests, so at most one image is
+        # ever "in flight" for the batch -- _batch_current_path is that one
+        # path, and is how on_prediction_ready/on_prediction_failed tell a
+        # batch result apart from an interactive one (DESIGN POINT B; see
+        # _is_batch_result).
+        self._batch_active = False
+        self._batch_snapshot = []
+        self._batch_index = 0
+        self._batch_total = 0
+        self._batch_scored = 0
+        self._batch_current_path = None
+
+        self.action_score_folder = None
+        self.action_sort = None
+        self.action_restore_order = None
+        self._score_label = None
         # The tooltip/statusTip each action carries while available (set by
         # new_action's `tip` argument, or '' for the threshold widget action).
         # refresh_actions overwrites both with the disabled-state hint while the
@@ -215,8 +267,25 @@ class AssistController(QObject):
             enabled=False)
         self.action_threshold = self._create_threshold_action()
 
+        self.action_score_folder = new_action(
+            app, 'Score Folder for Active Learning', self.score_folder, None, 'new',
+            'Run the model on every image in this folder and rank them by '
+            'uncertainty (triggering again cancels a run in progress)',
+            enabled=False)
+        self.action_sort = new_action(
+            app, 'Sort by Uncertainty', self.sort_by_uncertainty,
+            SHORTCUT_SORT_BY_UNCERTAINTY, 'labels',
+            'Reorder the file list so the most uncertain (highest-value) '
+            'images come first -- triage them with g/b in that order',
+            enabled=False)
+        self.action_restore_order = new_action(
+            app, 'Restore Filesystem Order', self.restore_original_order, None, 'undo',
+            'Undo Sort by Uncertainty and put the file list back in scan order',
+            enabled=False)
+
         self._actions = [self.action_auto, self.action_accept, self.action_reject,
-                         self.action_threshold]
+                         self.action_threshold, self.action_score_folder,
+                         self.action_sort, self.action_restore_order]
         # Captured before refresh_actions ever runs, so the very first refresh
         # (which may find no backend and stamp the hint over everything) still
         # has the real base tip to restore once a backend becomes available.
@@ -259,12 +328,18 @@ class AssistController(QObject):
         return action
 
     def load_active_actions(self):
-        """The actions that only make sense with an image open.
+        """The actions that only make sense with an image (or a scanned
+        folder) open.
 
         The threshold is not among them: it is a preference the user may set
-        before opening anything.
+        before opening anything. Score/Sort/Restore key off the FOLDER
+        (m_img_list), not the single open image, but toggle_actions' on/off
+        cycle only fires from load_file/close_file -- exactly the folder-open
+        / folder-closed transitions this app has -- so it is still the right
+        base gate; refresh_actions narrows each one further.
         """
-        return (self.action_auto, self.action_accept, self.action_reject)
+        return (self.action_auto, self.action_accept, self.action_reject,
+                self.action_score_folder, self.action_sort, self.action_restore_order)
 
     def refresh_actions(self):
         """(Re-)apply availability. MainWindow calls this from toggle_actions.
@@ -279,12 +354,32 @@ class AssistController(QObject):
         available = self.is_available()
         has_image = bool(getattr(self.app, 'file_path', None))
         has_suggestions = bool(self.provisional_shapes())
+        has_folder = bool(getattr(self.app, 'm_img_list', None))
+        batch_running = self._batch_active
 
-        self.action_auto.setEnabled(available and has_image)
-        self.action_accept.setEnabled(available and has_image and has_suggestions)
-        self.action_reject.setEnabled(available and has_image and has_suggestions)
+        # Auto-label/accept/reject are suspended for the duration of a batch
+        # run: auto_label_image would otherwise queue a SECOND request behind
+        # the batch's single-worker pool that _batch_step's bookkeeping does
+        # not expect (see DESIGN POINT B in _is_batch_result). Sort/Restore
+        # are suspended too -- reordering m_img_list out from under a batch
+        # walking its own frozen snapshot would not corrupt anything (the
+        # snapshot is independent), but the result would silently apply to
+        # whatever order existed when scoring finishes, which is confusing.
+        self.action_auto.setEnabled(available and has_image and not batch_running)
+        self.action_accept.setEnabled(available and has_image and has_suggestions and not batch_running)
+        self.action_reject.setEnabled(available and has_image and has_suggestions and not batch_running)
         if self.action_threshold is not None:
             self.action_threshold.setEnabled(available)
+
+        # Score Folder stays enabled WHILE a batch is running (see above) --
+        # triggering it again is exactly how the run is cancelled.
+        if self.action_score_folder is not None:
+            self.action_score_folder.setEnabled(available and has_folder)
+        if self.action_sort is not None:
+            self.action_sort.setEnabled(available and bool(self._uncertainty) and not batch_running)
+        if self.action_restore_order is not None:
+            self.action_restore_order.setEnabled(
+                available and self._original_order is not None and not batch_running)
 
         # A greyed-out menu with no explanation reads as a bug; say why.
         #
@@ -304,6 +399,9 @@ class AssistController(QObject):
                 base_tip = self._base_tips.get(action, '')
                 action.setStatusTip(base_tip)
                 action.setToolTip(base_tip or action.text())
+
+        self._update_batch_action_text()
+        self._update_score_label()
 
     # -- threshold ---------------------------------------------------------
 
@@ -369,6 +467,9 @@ class AssistController(QObject):
 
     def on_prediction_ready(self, image_path, detections):
         """UI thread (queued signal): safe to build Shapes and touch the canvas."""
+        if self._is_batch_result(image_path):
+            self._advance_batch(image_path, least_confidence(detections))
+            return
         if not self._is_current(image_path):
             return
 
@@ -382,6 +483,13 @@ class AssistController(QObject):
         self.refresh_actions()
 
     def on_prediction_failed(self, image_path, reason):
+        if self._is_batch_result(image_path):
+            logger.info('Batch scoring: %r failed (%s); recording max uncertainty '
+                        '("could not be scored" is exactly the case a human most '
+                        'needs to look at -- same reasoning as least_confidence\'s '
+                        'no-detection case).', image_path, reason)
+            self._advance_batch(image_path, 1.0)
+            return
         if not self._is_current(image_path):
             return
         self.app.status('Model failed: %s' % reason)
@@ -397,6 +505,35 @@ class AssistController(QObject):
         logger.info('Dropping stale prediction for %r (current image is %r)',
                     image_path, current)
         return False
+
+    def _is_batch_result(self, image_path):
+        """DESIGN POINT B -- batch predictions are, by definition, for images
+        OTHER than the one on screen (the whole point is to score the folder,
+        not the current image), so the ordinary stale-result guard
+        (``_is_current``) would drop every single one of them. This check
+        runs FIRST, ahead of ``_is_current``, and routes a batch result to
+        the batch collector on its own terms: "does this path match the ONE
+        request the batch is currently waiting on", never "does it match the
+        currently open file".
+
+        Mechanism chosen for keeping this from EVER double-firing together
+        with the interactive suggestion flow: while a batch is active,
+        ``refresh_actions`` disables ``auto_label_image`` (see there), so no
+        NEW interactive request can be issued during a run -- the single-
+        worker pool therefore has at most one request in flight for the
+        whole duration of a batch, and it is always the batch's own. A
+        result for the image that happens to be open right now is claimed
+        HERE (never reaching the interactive branch below), and once
+        ``_batch_current_path`` is cleared by ``_advance_batch`` it stops
+        matching, so a later, unrelated interactive result for that same
+        path (once auto-label is re-enabled after the batch finishes) is
+        free to go through ``_is_current`` normally. "Batch owns the
+        service" only for the single in-flight slot, not by taking over
+        ``InferenceService`` itself -- there is nothing to hand back.
+        """
+        return (self._batch_active
+                and self._batch_current_path is not None
+                and image_path == self._batch_current_path)
 
     # -- suggestions -------------------------------------------------------
 
@@ -567,3 +704,410 @@ class AssistController(QObject):
         if not mark_dirty and not was_dirty:
             app.dirty = False
             app.actions.save.setEnabled(False)
+
+    # -- active-learning triage (Phase 4) -----------------------------------
+    #
+    # THE IDEA: run the configured detector over every image in the folder,
+    # score each image's uncertainty with libs.inference.types.least_confidence
+    # (unchanged -- this module only calls it), and reorder m_img_list so the
+    # most uncertain (highest-value) images sort first. The user then triages
+    # with the EXISTING g/b shortcuts (MainWindow.classify_current_image) on
+    # the reordered stream. Nothing here replaces or wraps those shortcuts --
+    # they already index m_img_list by position, so reordering it is the
+    # entire mechanism.
+
+    def score_folder(self, _value=False):
+        """Start a batch uncertainty scan over every image currently in
+        ``self.app.m_img_list``, or cancel one already running -- this one
+        action does both (see the tooltip built in create_actions and
+        _update_batch_action_text's label swap), which is what makes
+        "trigger it again" a correct description of how to cancel.
+
+        Runs ONE image at a time (see _batch_step): load image i's QImage on
+        this (UI) thread, hand it to predict_async, and only step to i+1 once
+        that request's result comes back through on_prediction_ready /
+        on_prediction_failed. The single-worker pool would serialise a flood
+        of requests anyway; doing it this way instead of dispatching all N up
+        front means at most one image's pixel data is ever resident, and --
+        the actual point -- this method returns to the Qt event loop after
+        every single step, so a folder of hundreds of images never blocks the
+        UI thread inside a loop.
+        """
+        if self._batch_active:
+            return self.cancel_batch_scoring()
+        if not self.is_available():
+            self.app.status(self._unavailable_hint())
+            return False
+
+        # A snapshot, not a live view of self.app.m_img_list: the run must
+        # finish scoring exactly the images that existed when it started,
+        # even if a sort/restore got through (refresh_actions disables those
+        # while a batch is active, but this still makes the invariant
+        # explicit rather than relying only on that gate) or a classify move
+        # slips one out from under it (handled below -- a missing file scores
+        # as maximally uncertain rather than wedging the run).
+        images = list(self.app.m_img_list)
+        if not images:
+            self.app.status('Open a directory with images before scoring.')
+            return False
+
+        self._batch_snapshot = images
+        self._batch_index = 0
+        self._batch_total = len(images)
+        self._batch_scored = 0
+        self._batch_current_path = None
+        self._batch_active = True
+        self.refresh_actions()  # disables auto-label; flips this action's label
+        self._batch_step()
+        return True
+
+    def cancel_batch_scoring(self, _value=False):
+        """Stop a running batch scan cleanly. Scores already recorded for
+        images processed so far are KEPT (a partial scan is still useful:
+        Sort by Uncertainty happily sorts scored images first and pushes the
+        rest -- which includes every image the cancelled run never reached --
+        to the end, exactly like it does for a never-scored folder)."""
+        if not self._batch_active:
+            return False
+        scored, total = self._batch_scored, self._batch_total
+        self._batch_active = False
+        self._batch_current_path = None
+        self._batch_snapshot = []
+        self._batch_index = 0
+        self.app.status('Uncertainty scoring cancelled (%d/%d image(s) scored).'
+                        % (scored, total))
+        self.refresh_file_list()
+        self.refresh_actions()
+        return True
+
+    def _batch_step(self):
+        """Dispatch exactly one request: the batch's own progress -- not the
+        event loop, not a callback queue -- is what drives the next step,
+        via _advance_batch being the only caller of this method besides
+        score_folder's initial kick."""
+        if not self._batch_active:
+            return
+        if self._batch_index >= len(self._batch_snapshot):
+            self._finish_batch()
+            return
+
+        path = self._batch_snapshot[self._batch_index]
+        self._batch_current_path = path
+        self.app.status('Scoring %d/%d...' % (self._batch_index + 1, self._batch_total))
+
+        image = self._load_model_image(path)
+        if image is None:
+            # Unreadable/vanished file (e.g. removed by a classify move that
+            # ran concurrently with the scan): record it as maximally
+            # uncertain rather than silently skipping it or stalling the run
+            # waiting on a request that was never dispatched -- consistent
+            # with least_confidence's own "could not tell = worth a look"
+            # stance on empty detections.
+            self._advance_batch(path, 1.0)
+            return
+
+        # predict_async may resolve SYNCHRONOUSLY -- the tests' executor runs
+        # inline, and predict_async itself fails synchronously for a None
+        # image/backend -- or ASYNCHRONOUSLY (the production thread pool,
+        # via a queued signal). Either way _advance_batch is only ever called
+        # from on_prediction_ready/on_prediction_failed, never from here, so
+        # a synchronous resolution cannot double-advance the queue.
+        self.service.predict_async(path, image)
+
+    def _advance_batch(self, path, score):
+        self._uncertainty[path] = score
+        self._invalidate_ranks()
+        self._batch_scored += 1
+        self._batch_index += 1
+        self._batch_current_path = None
+        self._update_batch_action_text()
+        self._batch_step()
+
+    def _finish_batch(self):
+        scored = self._batch_scored
+        self._batch_active = False
+        self._batch_current_path = None
+        self._batch_snapshot = []
+        self._batch_index = 0
+        self.app.status('Scored %d image(s) for uncertainty -- Sort by Uncertainty '
+                        'is ready.' % scored)
+        self.refresh_file_list()
+        self.refresh_actions()
+
+    def _load_model_image(self, path):
+        """Load one image from disk and convert it exactly like the
+        interactive path does (to_model_image), ON THE UI THREAD -- QImage
+        construction is a Qt operation and must never happen on the worker
+        (see libs/inference/service.py's module docstring).
+
+        Reimplements labelImg.read() (QImageReader + setAutoTransform, NOT a
+        bare QImage(path)) rather than importing it: labelImg.py imports this
+        module at load time, so `from labelImg import read` here would be a
+        circular import. Using the same loader (auto EXIF transform included)
+        matters for more than cosmetics -- a real detector's confidence can
+        depend on orientation, so a batch score must be produced from the
+        same pixels the interactive path would have scored.
+        """
+        reader = QImageReader(path)
+        reader.setAutoTransform(True)
+        qimage = reader.read()
+        if qimage is None or qimage.isNull():
+            return None
+        return to_model_image(qimage)
+
+    def _update_batch_action_text(self):
+        if self.action_score_folder is None:
+            return
+        if self._batch_active:
+            self.action_score_folder.setText(
+                'Cancel Scoring (%d/%d)' % (self._batch_scored, self._batch_total))
+        else:
+            self.action_score_folder.setText('Score Folder for Active Learning')
+
+    # -- reordering ----------------------------------------------------------
+
+    def sort_by_uncertainty(self, _value=False):
+        """Reorder ``self.app.m_img_list`` DESCENDING by stored uncertainty:
+        most uncertain (highest score) first. Unscored images (never reached
+        by a scan, or added since) sort to the END, in their existing
+        relative order -- they are not dropped, just deprioritised, since a
+        partial/cancelled scan is still a useful ordering for the images it
+        did reach.
+        """
+        if self._batch_active:
+            self.app.status('Wait for uncertainty scoring to finish (or cancel it) '
+                            'before sorting.')
+            return False
+        if not self._uncertainty:
+            self.app.status('Score the folder first (AI > Score Folder for '
+                            'Active Learning).')
+            return False
+
+        self._reorder(self._sort_key)
+        self._sort_active = True
+        unscored = sum(1 for p in self.app.m_img_list if p not in self._uncertainty)
+        self.app.status('Sorted %d image(s) by uncertainty, most uncertain first '
+                        '(%d unscored at the end).'
+                        % (len(self.app.m_img_list), unscored))
+        return True
+
+    def _sort_key(self, path):
+        """DESCENDING uncertainty (most uncertain / highest score first);
+        unscored images sort after every scored one. Shared by
+        sort_by_uncertainty and reapply_sort_if_active so a same-directory
+        rescan re-derives exactly the ordering a fresh sort would produce.
+        """
+        score = self._uncertainty.get(path)
+        if score is None:
+            return (1, 0.0)
+        return (0, -score)
+
+    def restore_original_order(self, _value=False):
+        """Undo Sort by Uncertainty: put m_img_list back in the order
+        scan_all_images produced it in (natural filesystem order), captured
+        by on_directory_scanned at the same moment _uncertainty was cleared.
+        """
+        if self._batch_active:
+            self.app.status('Wait for uncertainty scoring to finish (or cancel it) '
+                            'before restoring order.')
+            return False
+        if self._original_order is None:
+            self.app.status('Nothing to restore.')
+            return False
+
+        order_index = {path: i for i, path in enumerate(self._original_order)}
+        # A path absent from the snapshot should not happen (the snapshot is
+        # taken from the very scan that produced the current file set), but
+        # sorting it to the end rather than raising keeps this from crashing
+        # on a state this controller does not fully control (m_img_list is
+        # MainWindow's).
+        self._reorder(lambda path: order_index.get(path, len(order_index)))
+        self._sort_active = False
+        self.app.status('Restored filesystem order.')
+        return True
+
+    def reapply_sort_if_active(self):
+        """Called by MainWindow.import_dir_images right after a SAME-directory
+        refresh (``reset_active_learning=False``) has just replaced
+        m_img_list with a fresh natural-order scan (scan_all_images always
+        runs; only the score/order RESET is conditional -- see that method).
+
+        That rescan is unavoidable -- classify_current_image/delete_image/
+        undo_classify call it because a file genuinely left or returned to
+        the folder -- but if the user had sorted by uncertainty, letting it
+        stand as plain filesystem order would silently flip the queue back
+        after the very first g/b press, which defeats the entire feature:
+        the point is to keep triaging a SORTED queue with g/b, not to sort it
+        once and lose the order on the first move. Re-running the same key
+        sort_by_uncertainty uses restores exactly that order for whatever
+        images remain (a newly-appeared file, if any, is unscored and sorts
+        to the end, same as any other unscored image).
+
+        A no-op when no sort is active (the common case): plain filesystem
+        order from the scan is left standing, which is what
+        on_directory_scanned's reset already expects for a fresh folder.
+        """
+        if not self._sort_active:
+            return
+        self.app.m_img_list.sort(key=self._sort_key)
+
+    def _reorder(self, sort_key):
+        """Reorder ``self.app.m_img_list`` IN PLACE by ``sort_key``, then
+        repair every piece of state that indexes into it by POSITION.
+
+        cur_img_idx is the one that matters: it is stored as a position, but
+        what it must keep meaning is "the image currently on screen" -- an
+        IDENTITY, which moves to a different position by definition whenever
+        the order changes. Re-deriving it by looking the open file's path
+        back up in the new order (rather than leaving the old integer
+        sitting there, now pointing at whatever image happens to occupy that
+        slot next) is what stops a reorder from silently swapping the canvas
+        to a different image than the one the user is looking at. Every
+        caller of this method (sort_by_uncertainty, restore_original_order)
+        goes through it for exactly this reason -- there is no other path
+        that reorders m_img_list.
+
+        file_list_widget is rebuilt from the new order immediately after, so
+        widget row i keeps mirroring m_img_list[i] -- the invariant
+        file_item_double_clicked, load_file's selection highlight, and
+        classify/save/navigation's index lookups all rely on.
+        """
+        current_path = self.app.file_path
+        self.app.m_img_list.sort(key=sort_key)
+        if current_path and current_path in self.app.m_img_list:
+            self.app.cur_img_idx = self.app.m_img_list.index(current_path)
+        self.refresh_file_list()
+        self.refresh_actions()
+
+    def on_directory_scanned(self):
+        """Called by MainWindow.import_dir_images for a GENUINE (re)scan of a
+        directory's contents (``reset_active_learning=True``, the default) --
+        NOT for the same-directory refreshes that follow a classify move /
+        delete / undo (those pass ``reset_active_learning=False``). Those
+        refreshes reuse import_dir_images purely to re-derive m_img_list
+        after a file left or returned to the folder; resetting the triage
+        order on every one of them would defeat the feature's entire point,
+        since g/b (classify_current_image) IS that refresh's caller and is
+        also the normal way a user works through a sorted queue.
+
+        A genuinely new folder's images share nothing with the old scores
+        (different files, quite possibly different content at the same
+        name), so both the score map and the "what is filesystem order"
+        snapshot are invalidated here. Any batch run in flight was walking
+        the OLD self.app.m_img_list snapshot, which import_dir_images has
+        just replaced out from under it -- cancel it rather than let it
+        silently keep scoring paths that may no longer be in this folder at
+        all.
+        """
+        self.cancel_batch_scoring()
+        self._uncertainty = {}
+        self._invalidate_ranks()
+        self._original_order = list(self.app.m_img_list)
+        self._sort_active = False
+        self.refresh_file_list()
+        self.refresh_actions()
+
+    # -- file list display -----------------------------------------------
+
+    def create_status_widget(self):
+        """A permanent status-bar label (MainWindow adds it via
+        ``statusBar().addPermanentWidget``, next to the existing coordinate
+        label) showing the CURRENT image's uncertainty rank/score.
+        Permanent, not ``app.status()``'s transient message area: a
+        transient message would be stomped by the very next status() call
+        (e.g. load_file's "Loaded ..."), but this needs to survive
+        navigation -- refresh_actions keeps it in sync on every image load
+        (see _update_score_label).
+        """
+        self._score_label = QLabel('')
+        return self._score_label
+
+    def refresh_file_list(self):
+        """(Re)build ``self.app.file_list_widget`` from ``self.app.m_img_list``,
+        in order, annotating each row with its uncertainty rank/score (once
+        scored) as both a text suffix and a heat-scale background colour.
+
+        Always clears and repopulates the WHOLE widget rather than patching
+        individual rows in place: row i must keep mirroring m_img_list[i] for
+        every other piece of navigation, and a full rebuild is the only way
+        that is guaranteed after m_img_list has been reordered.
+        """
+        widget = getattr(self.app, 'file_list_widget', None)
+        if widget is None:  # pragma: no cover - defensive; always set by MainWindow
+            return
+        widget.clear()
+        ranks = self._ranks()
+        total_scored = len(self._uncertainty)
+        for image_path in self.app.m_img_list:
+            item = QListWidgetItem(self._list_item_text(image_path, ranks, total_scored))
+            color = self._heat_color(image_path)
+            if color is not None:
+                item.setBackground(color)
+            widget.addItem(item)
+
+    def _list_item_text(self, image_path, ranks, total_scored):
+        """Item text stays the bare path when unscored (this is what
+        file_item_double_clicked's row lookup expects to display, and what a
+        user would search the list by); once scored it gets a rank/score
+        suffix so the priority order is legible without opening every image.
+        """
+        score = self._uncertainty.get(image_path)
+        if score is None:
+            return image_path
+        return '%s   [#%d/%d, uncertainty %.2f]' % (
+            image_path, ranks[image_path], total_scored, score)
+
+    def _heat_color(self, image_path):
+        """Pale green (confident / low uncertainty) -> pale red (uncertain /
+        high), so the review queue's priority is visible at a glance without
+        reading numbers. ``None`` for an unscored image: no tint -- it just
+        sorts to the end, it is not "confident".
+
+        Both ends of the scale are kept pale (every channel >= 135) so the
+        default (black) item text stays legible regardless of the desktop's
+        light/dark widget style -- this is a native Qt list, not a themed web
+        page, so there is no dark-mode stylesheet to coordinate with.
+        """
+        score = self._uncertainty.get(image_path)
+        if score is None:
+            return None
+        score = min(1.0, max(0.0, float(score)))
+        red = int(135 + 120 * score)
+        green = int(255 - 120 * score)
+        blue = 135
+        return QColor(red, green, blue)
+
+    def _ranks(self):
+        """path -> 1-based rank among SCORED images, most uncertain first.
+        One sort for the whole file-list refresh / status-label update
+        (cached until _uncertainty changes), not one re-sort per row.
+        """
+        if self._ranks_cache is None:
+            ordered = sorted(self._uncertainty.items(), key=lambda kv: -kv[1])
+            self._ranks_cache = {path: i for i, (path, _score) in enumerate(ordered, start=1)}
+        return self._ranks_cache
+
+    def _invalidate_ranks(self):
+        self._ranks_cache = None
+
+    def _update_score_label(self):
+        """Keep the permanent status-bar label (create_status_widget) in
+        sync with whatever image is open right now. Called from
+        refresh_actions, which already runs on every navigation
+        (MainWindow.toggle_actions -> refresh_actions) and every scoring
+        state change.
+        """
+        if self._score_label is None:
+            return
+        path = getattr(self.app, 'file_path', None)
+        score = self._uncertainty.get(path) if path else None
+        if score is None:
+            self._score_label.setText('')
+            self._score_label.setToolTip('')
+            return
+        rank = self._ranks().get(path)
+        total = len(self._uncertainty)
+        self._score_label.setText('Uncertainty %.2f (rank %d/%d)' % (score, rank, total))
+        self._score_label.setToolTip(
+            'Active-learning uncertainty score for the open image -- '
+            'higher means the model is less sure, i.e. more worth reviewing.')

@@ -74,7 +74,7 @@ COCO는 이 포크가 지원하는 4번째 포맷이며, 나머지 셋(PascalVOC
 
 CreateML도 `.json`을 쓰므로, 확장자만으로는 어느 리더를 써야 할지 알 수 없다. 그래서 `.json`을 여는 모든
 경로(폴더 스캔 시 자동 로드, Import 대화상자)가 **파일을 열어 내용을 스니핑**한 뒤 리더를 고른다
-(`load_json_by_filename`, `labelImg.py:2231-2241`):
+(`load_json_by_filename`, `labelImg.py:2267-2277`):
 
 - 최상위가 `images`/`annotations`/`categories` 중 하나라도 가진 **dict**면 → COCO (`is_coco_dict`,
   `libs/coco_io.py:82-91`)

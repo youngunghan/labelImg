@@ -59,7 +59,7 @@ CREATE, EDIT = list(range(2))   # canvas.py:33
 - `Ctrl + 휠` → `zoomRequest`(줌)
 - 그 외 → `scrollRequest`(스크롤/패닝)
 
-실제 줌 배율과 밝기는 MainWindow의 `ZoomWidget`/`LightWidget` 값으로 결정되고, `paint_canvas`(`labelImg.py:1388`)가 `canvas.scale = 0.01*zoom_widget.value()`, `canvas.overlay_color = light_widget.color()`를 세팅한다. → [../reference/shortcuts.md](../reference/shortcuts.md) · [architecture.md](architecture.md)
+실제 줌 배율과 밝기는 MainWindow의 `ZoomWidget`/`LightWidget` 값으로 결정되고, `paint_canvas`(`labelImg.py:1402`)가 `canvas.scale = 0.01*zoom_widget.value()`, `canvas.overlay_color = light_widget.color()`를 세팅한다. → [../reference/shortcuts.md](../reference/shortcuts.md) · [architecture.md](architecture.md)
 
 ## 커서
 

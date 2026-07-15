@@ -609,6 +609,12 @@ class MainWindow(QMainWindow, WindowMixin):
         self.label_coordinates = QLabel('')
         self.statusBar().addPermanentWidget(self.label_coordinates)
 
+        # (fork) Active-learning triage: the current image's uncertainty
+        # rank/score, kept in sync by AssistController.refresh_actions on
+        # every navigation. Wiring only -- see AssistController.
+        # create_status_widget / _update_score_label for the behaviour.
+        self.statusBar().addPermanentWidget(self.assist.create_status_widget())
+
         # Open Dir if default file
         if self.file_path and os.path.isdir(self.file_path):
             self.open_dir_dialog(dir_path=self.file_path, silent=True)
@@ -881,7 +887,15 @@ class MainWindow(QMainWindow, WindowMixin):
 
     # Tzutalin 20160906 : Add file list and dock to move faster
     def file_item_double_clicked(self, item=None):
-        self.cur_img_idx = self.m_img_list.index(ustr(item.text()))
+        # row(), not text(): AssistController.refresh_file_list annotates a
+        # scored row's text with a rank/score suffix (see
+        # AssistController._list_item_text), so item.text() is no longer
+        # necessarily the bare path. file_list_widget row i always mirrors
+        # m_img_list[i] -- the same invariant load_file's own selection
+        # highlight already relies on (m_img_list.index(path) ->
+        # file_list_widget.item(index)) -- so row() is not just a workaround,
+        # it is the more direct expression of that invariant.
+        self.cur_img_idx = self.file_list_widget.row(item)
         filename = self.m_img_list[self.cur_img_idx]
         if filename:
             self.load_file(filename)
@@ -1571,7 +1585,19 @@ class MainWindow(QMainWindow, WindowMixin):
             self.default_save_dir = target_dir_path
         self.import_dir_images(target_dir_path)
 
-    def import_dir_images(self, dir_path):
+    def import_dir_images(self, dir_path, reset_active_learning=True):
+        """Rescan `dir_path` into m_img_list and rebuild the file list.
+
+        `reset_active_learning=False` is for the callers that reuse this
+        method to refresh the SAME directory after a filesystem change they
+        just made themselves (classify_current_image's g/b move, delete_image,
+        undo_classify) rather than a user genuinely opening a (possibly
+        different) folder. Those refreshes must not wipe an uncertainty
+        sort-in-progress -- g/b IS the normal way a user works through a
+        sorted triage queue, so resetting on every move would defeat Sort by
+        Uncertainty the instant it was used. See AssistController.
+        on_directory_scanned for what the reset actually does.
+        """
         if not self.may_continue() or not dir_path:
             return
 
@@ -1581,10 +1607,16 @@ class MainWindow(QMainWindow, WindowMixin):
         self.file_list_widget.clear()
         self.m_img_list = self.scan_all_images(dir_path)
         self.img_count = len(self.m_img_list)
+        if reset_active_learning:
+            self.assist.on_directory_scanned()
+        else:
+            # Same-directory refresh: scan_all_images just replaced m_img_list
+            # with plain filesystem order regardless of reset_active_learning
+            # -- re-apply an active uncertainty sort now, or it would silently
+            # revert to filesystem order on every single classify move.
+            self.assist.reapply_sort_if_active()
         self.open_next_image()
-        for imgPath in self.m_img_list:
-            item = QListWidgetItem(imgPath)
-            self.file_list_widget.addItem(item)
+        self.assist.refresh_file_list()
 
     def verify_image(self, _value=False):
         # Proceeding next image without dialog if having any label
@@ -1760,7 +1792,9 @@ class MainWindow(QMainWindow, WindowMixin):
             idx = self.cur_img_idx
             if os.path.exists(delete_path):
                 os.remove(delete_path)
-            self.import_dir_images(self.last_open_dir)
+            # Same-directory refresh, not a new folder -- keep any active
+            # uncertainty sort in place (see import_dir_images docstring).
+            self.import_dir_images(self.last_open_dir, reset_active_learning=False)
             if self.img_count > 0:
                 self.cur_img_idx = min(idx, self.img_count - 1)
                 filename = self.m_img_list[self.cur_img_idx]
@@ -1915,7 +1949,9 @@ class MainWindow(QMainWindow, WindowMixin):
         self.status(note)
 
         # 목록 새로고침 + 다음 이미지 (delete_image 패턴)
-        self.import_dir_images(self.last_open_dir)
+        # reset_active_learning=False: g/b 자체가 우선순위 정렬 큐를 순회하는
+        # 정상적인 방법이므로, 이 새로고침이 매번 정렬/점수를 지워버리면 안 된다.
+        self.import_dir_images(self.last_open_dir, reset_active_learning=False)
         if self.img_count > 0:
             self.cur_img_idx = min(idx, self.img_count - 1)
             self.load_file(self.m_img_list[self.cur_img_idx])
@@ -1942,7 +1978,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     # 이미 복원된 항목은 다음 undo에서 isfile 가드로 건너뛴다.
                     self.classify_history.append(moves)
                     if self.last_open_dir:
-                        self.import_dir_images(self.last_open_dir)
+                        self.import_dir_images(self.last_open_dir, reset_active_learning=False)
                     self.error_message(
                         'Undo failed',
                         'Could not fully restore: %s\n'
@@ -1956,7 +1992,7 @@ class MainWindow(QMainWindow, WindowMixin):
                     (os.path.basename(image_original) if image_original else ''))
 
         if self.last_open_dir:
-            self.import_dir_images(self.last_open_dir)
+            self.import_dir_images(self.last_open_dir, reset_active_learning=False)
             if image_original and image_original in self.m_img_list:
                 self.cur_img_idx = self.m_img_list.index(image_original)
                 self.load_file(image_original)

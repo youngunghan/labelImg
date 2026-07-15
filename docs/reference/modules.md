@@ -2,7 +2,7 @@
 
 파일별 핵심 클래스/함수. 라인 번호는 현재 저장소(`D:\labelImg`) 기준이다.
 
-## `labelImg.py` (2406줄) — 앱 본체
+## `labelImg.py` (2442줄) — 앱 본체
 
 | 심볼 | 위치 | 역할 |
 |---|---|---|
@@ -30,13 +30,13 @@
 | `show_bounding_box_from_annotation_file` | `:1342` | xml > txt > json 우선순위로 어노테이션 자동 탐색(json은 `load_json_by_filename`으로 CreateML/COCO 콘텐츠 스니핑) |
 | `is_same_path` / `coco_dataset_target` | `:665` / `:670` | (포크, COCO) 대소문자 무시 경로 비교(staticmethod) · 이 세션이 병합해 쓸 COCO 데이터셋 json 경로 결정 — 명시적으로 고른 `coco_dataset_path` 우선, 없으면 `<save dir>/annotations.json`(save dir도 없으면 이미지 폴더), 그마저 없으면 `None`(`:670-687`) → [formats.md](formats.md) |
 | `open_dir_dialog` | `:1541` | 디렉터리 열기 진입점(시작 시 `__init__` `:614`에서 `dir_path`+`silent=True`로 호출). (로컬 수정 2026-07-03) `dir_path` 인자가 명시되면 설정 pkl의 `lastOpenDir`보다 우선(`:1548-1553`) · 다이얼로그 취소 시 상태 불변 조기 반환(`:1560-1562`) · `default_save_dir`를 임포트 전에 확정 — 시작 시 명령줄 `save_dir`가 있으면 그것을 유지, 없으면 연 폴더(`:1568-1571`) |
-| `import_dir_images` / `scan_all_images` / `open_next_image` / `open_prev_image` | `:1574` / `:1479` / `:1639` / `:1614` | 디렉터리 스캔·이미지 탐색(재귀 `os.walk` — COCO의 basename 충돌 경로가 여기서 발생) |
-| `save_file` / `save_file_as` | `:1684` / `:1710` | 저장 경로 결정 → `save_labels` |
-| `classify_current_image` / `undo_classify` / `create_classify_actions` / `edit_classify_categories` / `rebuild_classify_actions` | `:1771` / `:1928` / `:1967` / `:1980` / `:2039` | (로컬 확장) 사용자 정의 카테고리(기본 g→good·b→bad, `SETTING_CLASSIFY_TARGETS`) 단축키로 현재 이미지+라벨(.xml/.txt/.json)을 형제 폴더 `<폴더>_<이름>`으로 이동 후 다음 이미지 표시, Ctrl+Z로 직전 분류 원복. File > Edit Classify Categories로 카테고리를 라이브 편집(메뉴/단축키 재구성, 재시작 불필요). 라벨은 `default_save_dir` 우선, 없으면 이미지 옆에서 탐색(라벨 없이 이미지만 이동되면 상태바 경고). 내부 헬퍼 `_cleanup_dest_dir` `:1803` / `_taken` `:1820` / `_rollback` `:1833` |
-| `get_persistent_classes_file` / `edit_default_classes` / `reload_predefined_classes` | `:2141` / `:2161` / `:2180` | (로컬 확장) `predefined_classes.txt` 영속 경로 결정(frozen exe면 exe 옆 파일, 없으면 번들 기본으로 부트스트랩) · Edit Default Classes 다이얼로그(Ctrl+Shift+E, 저장 후 리로드) · 클래스 목록 리로드(`label_hist`·`default_label`·`LabelDialog`·기본라벨 콤보 갱신) |
-| `load_pascal_xml_by_filename` / `load_yolo_txt_by_filename` | `:2195` / `:2208` | 각 Reader 인스턴스화 → `load_labels`. YOLO는 로드 실패(`YoloParseError` 등)를 에러 대화상자로 처리하고 불량 라인 수를 상태바에 표시(`:2219-2228`) |
-| `load_json_by_filename` / `load_create_ml_json_by_filename` / `load_coco_json_by_filename` | `:2231` / `:2243` / `:2256` | (포크, COCO) `load_json_by_filename`이 `is_coco_json`으로 콘텐츠를 먼저 스니핑해 COCO/CreateML 리더를 고른다(`:2232-2241`) → [formats.md](formats.md). `load_coco_json_by_filename`은 데이터셋에 이 이미지가 없으면(`found_image=False`) 포맷을 바꾸지 않고 `False`를 반환한다(`:2263-2281`) |
-| `import_coco_dialog` / `export_coco_dialog` | `:2283` / `:2312` | (포크, COCO) File > Import/Export COCO... 핸들러 — 데이터셋 json을 골라 현재 이미지를 불러오거나(Import) 병합 저장(Export)하고, 고른 경로를 이후 저장의 타깃으로 고정한다(`coco_dataset_path`) |
+| `import_dir_images` / `scan_all_images` / `open_next_image` / `open_prev_image` | `:1588` / `:1493` / `:1671` / `:1646` | 디렉터리 스캔·이미지 탐색(재귀 `os.walk` — COCO의 basename 충돌 경로가 여기서 발생) |
+| `save_file` / `save_file_as` | `:1716` / `:1742` | 저장 경로 결정 → `save_labels` |
+| `classify_current_image` / `undo_classify` / `create_classify_actions` / `edit_classify_categories` / `rebuild_classify_actions` | `:1805` / `:1964` / `:2003` / `:2016` / `:2075` | (로컬 확장) 사용자 정의 카테고리(기본 g→good·b→bad, `SETTING_CLASSIFY_TARGETS`) 단축키로 현재 이미지+라벨(.xml/.txt/.json)을 형제 폴더 `<폴더>_<이름>`으로 이동 후 다음 이미지 표시, Ctrl+Z로 직전 분류 원복. File > Edit Classify Categories로 카테고리를 라이브 편집(메뉴/단축키 재구성, 재시작 불필요). 라벨은 `default_save_dir` 우선, 없으면 이미지 옆에서 탐색(라벨 없이 이미지만 이동되면 상태바 경고). 내부 헬퍼 `_cleanup_dest_dir` `:1837` / `_taken` `:1854` / `_rollback` `:1867` |
+| `get_persistent_classes_file` / `edit_default_classes` / `reload_predefined_classes` | `:2177` / `:2197` / `:2216` | (로컬 확장) `predefined_classes.txt` 영속 경로 결정(frozen exe면 exe 옆 파일, 없으면 번들 기본으로 부트스트랩) · Edit Default Classes 다이얼로그(Ctrl+Shift+E, 저장 후 리로드) · 클래스 목록 리로드(`label_hist`·`default_label`·`LabelDialog`·기본라벨 콤보 갱신) |
+| `load_pascal_xml_by_filename` / `load_yolo_txt_by_filename` | `:2231` / `:2244` | 각 Reader 인스턴스화 → `load_labels`. YOLO는 로드 실패(`YoloParseError` 등)를 에러 대화상자로 처리하고 불량 라인 수를 상태바에 표시(`:2255-2264`) |
+| `load_json_by_filename` / `load_create_ml_json_by_filename` / `load_coco_json_by_filename` | `:2267` / `:2279` / `:2292` | (포크, COCO) `load_json_by_filename`이 `is_coco_json`으로 콘텐츠를 먼저 스니핑해 COCO/CreateML 리더를 고른다(`:2268-2277`) → [formats.md](formats.md). `load_coco_json_by_filename`은 데이터셋에 이 이미지가 없으면(`found_image=False`) 포맷을 바꾸지 않고 `False`를 반환한다(`:2299-2317`) |
+| `import_coco_dialog` / `export_coco_dialog` | `:2319` / `:2348` | (포크, COCO) File > Import/Export COCO... 핸들러 — 데이터셋 json을 골라 현재 이미지를 불러오거나(Import) 병합 저장(Export)하고, 고른 경로를 이후 저장의 타깃으로 고정한다(`coco_dataset_path`) |
 | `closeEvent` | `:1417` | 대부분의 `SETTING_*` 키(창 크기/위치, 색상, 마지막 포맷 등) 기록 후 `Settings.save()`. `SETTING_MODEL_BACKEND`만 예외로 **조건부** 기록이다 — `self.assist.backend_name`이 실제로 설정된 값일 때만 쓰고, 아무것도 설정되지 않았으면 그 키를 아예 쓰지 않는다(레거시 키가 남아 있으면 지운다, `:1449-1472`) → [settings.md](settings.md) |
 
 주의: 소스가 수정되면 (특히 후반부) 라인 번호가 밀릴 수 있다 — 정확한 위치는 심볼명 검색으로 재확인한다.
@@ -105,7 +105,7 @@
 |---|---|---|
 | `libs/assist/__init__.py` (20줄) | (문서만) | `libs.inference.Detection` → (`suggestion.py`) → `libs.shape.Shape(provisional)` 흐름 설명 |
 | `libs/assist/suggestion.py` (77줄) | `detection_to_shape`(`:42`) / `detections_to_shapes`(`:61`) / `style_as_committed`(`:65`) / `PROVISIONAL_LINE_COLOR`/`PROVISIONAL_FILL_COLOR`(호박색, `:38-39`) | `Detection`↔`Shape` 순수 어댑터(MainWindow·캔버스·설정 몰라도 됨). 좌표는 그대로 캔버스에 옮겨진다 — 스케일 계산이 이 파일에 등장하면 버그(`:9-14`) |
-| `libs/assist/controller.py` (569줄) | `AssistController`(QObject, `:100`) | MainWindow가 AI를 위임하는 유일한 객체. 액션: **Auto-label Image=Ctrl+I**(`:204-207`)·**Accept All=Ctrl+Return**(`:208-211`)·**Reject All=Ctrl+Backspace**(`:212-215`)+신뢰도 슬라이더(`_create_threshold_action`, `:227-259`). `on_prediction_ready`(`:370`)가 `_is_current`(`:390`)로 **stale 결과를 드롭**(이미지 전환 후 늦게 도착한 예측이 엉뚱한 이미지에 박히는 것 방지) · `provisional_shapes()`(`:403`)는 `_shapes` 캐시가 아니라 **캔버스를 직접 읽음**(Ctrl+D 복제나 수동 삭제로 캔버스와 내부 상태가 어긋날 수 있다는 주석, `:403-423`) · `accept_all`/`reject_all`(`:481`/`:502`). **설정 읽기 시 레거시 `'stub'` 무시**: `__init__`(`:102-119`)이 `SETTING_MODEL_BACKEND`가 `'stub'`이면(구 `DEFAULT_BACKEND`가 `'stub'`이던 시절 저장된 값) 미설정으로 취급한다(`_LEGACY_IMPLICIT_DEFAULT_BACKEND`, `:82-97`) → [settings.md](settings.md) |
+| `libs/assist/controller.py` (1113줄) | `AssistController`(QObject, `:112`) | MainWindow가 AI를 위임하는 유일한 객체. 액션: **Auto-label Image=Ctrl+I**(`:256-259`)·**Accept All=Ctrl+Return**(`:260-263`)·**Reject All=Ctrl+Backspace**(`:264-267`)+신뢰도 슬라이더(`_create_threshold_action`, `:296-328`). `on_prediction_ready`(`:468`)가 `_is_current`(`:498`)로 **stale 결과를 드롭**(이미지 전환 후 늦게 도착한 예측이 엉뚱한 이미지에 박히는 것 방지) · `provisional_shapes()`(`:540`)는 `_shapes` 캐시가 아니라 **캔버스를 직접 읽음**(Ctrl+D 복제나 수동 삭제로 캔버스와 내부 상태가 어긋날 수 있다는 주석, `:540-560`) · `accept_all`/`reject_all`(`:618`/`:639`). **설정 읽기 시 레거시 `'stub'` 무시**: `__init__`(`:114-133`)이 `SETTING_MODEL_BACKEND`가 `'stub'`이면(구 `DEFAULT_BACKEND`가 `'stub'`이던 시절 저장된 값) 미설정으로 취급한다(`_LEGACY_IMPLICIT_DEFAULT_BACKEND`, `:94-109`) → [settings.md](settings.md). **능동학습 (Phase 4, 신규)**: `score_folder`/`cancel_batch_scoring`(`:719-782`)가 `m_img_list`를 한 번에 한 이미지씩 배치 채점하고, `_is_batch_result`(`:509-538`)가 그 결과를 대화형 stale-drop과 분리해서 처리한다 · `sort_by_uncertainty`/`restore_original_order`/`_reorder`(`:869-981`)가 `m_img_list`를 재정렬하고 현재 선택을 보존한다 · `refresh_file_list`(`:1025-1047`)가 파일 목록에 순위/점수를 표시한다 |
 
 관련 → [shortcuts.md](shortcuts.md) · [settings.md](settings.md).
 
