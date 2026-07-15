@@ -179,18 +179,29 @@ class AssistController(QObject):
         self._sort_active = False
 
         # One batch run at a time; state for the currently running scan (or
-        # all-default/empty when none is running). The single-worker pool
-        # (InferenceService) serialises requests, so at most one image is
-        # ever "in flight" for the batch -- _batch_current_path is that one
-        # path, and is how on_prediction_ready/on_prediction_failed tell a
-        # batch result apart from an interactive one (DESIGN POINT B; see
-        # _is_batch_result).
+        # all-default/empty when none is running). _batch_current_path is
+        # the one image the batch is currently waiting a result for (used by
+        # _load_model_image / status text / _advance_batch), but which FLOW
+        # a result belongs to is decided by _dispatch_request /
+        # _pop_request_kind's FIFO tag, not by matching this path -- see
+        # _dispatch_request's docstring for why bare path equality is wrong.
         self._batch_active = False
         self._batch_snapshot = []
         self._batch_index = 0
         self._batch_total = 0
         self._batch_scored = 0
         self._batch_current_path = None
+
+        # FIFO of 'interactive'/'batch' tags, one appended per predict_async
+        # dispatch (_dispatch_request) and popped by on_prediction_ready /
+        # on_prediction_failed (_pop_request_kind). InferenceService's single
+        # worker resolves requests strictly in submission order, so this is
+        # what tells an interactive result and a batch result apart CORRECTLY
+        # even when a Ctrl+I request is still outstanding when score_folder()
+        # starts and both happen to target the same image path -- routing by
+        # bare path equality (the pre-fix approach) misattributes exactly
+        # that race. See _dispatch_request for the full reasoning.
+        self._pending_requests = []
 
         self.action_score_folder = None
         self.action_sort = None
@@ -360,7 +371,10 @@ class AssistController(QObject):
         # Auto-label/accept/reject are suspended for the duration of a batch
         # run: auto_label_image would otherwise queue a SECOND request behind
         # the batch's single-worker pool that _batch_step's bookkeeping does
-        # not expect (see DESIGN POINT B in _is_batch_result). Sort/Restore
+        # not expect. This is UX hygiene, not the correctness fix for the
+        # interleaving race -- that is _dispatch_request/_pop_request_kind's
+        # FIFO tagging, which stays correct even for a request dispatched
+        # before this disablement took effect. Sort/Restore
         # are suspended too -- reordering m_img_list out from under a batch
         # walking its own frozen snapshot would not corrupt anything (the
         # snapshot is independent), but the result would silently apply to
@@ -463,12 +477,61 @@ class AssistController(QObject):
             return False
 
         self.app.status('Running the model on %s...' % file_path)
-        return self.service.predict_async(file_path, image)
+        return self._dispatch_request('interactive', file_path, image)
+
+    def _dispatch_request(self, kind, path, image):
+        """Submit one predict_async request, tagged with which flow started
+        it ('interactive' or 'batch') -- the ONLY call sites are here and
+        _batch_step, and every dispatch must go through one of them.
+
+        ROOT-CAUSE FIX (was DESIGN POINT B): routing a result by bare path
+        equality against ``_batch_current_path`` is wrong -- InferenceService
+        queues rather than rejects concurrent requests (single-worker pool),
+        and nothing ever stopped an interactive request from still being
+        outstanding when score_folder() starts. If that request and the
+        batch's own first request both target the SAME path (e.g. the
+        image already open when the batch begins), path-based routing
+        misattributes: the interactive result gets consumed as the batch's
+        progress, and the batch's own later result for that path gets
+        injected into the interactive suggestion flow instead.
+
+        The single worker resolves requests in the exact order they were
+        submitted (QThreadPool runs same-priority QRunnables FIFO; the tests'
+        SynchronousExecutor resolves inline, i.e. immediately, which is
+        trivially FIFO too), so tagging every dispatch by ORDER rather than
+        by path is unambiguous regardless of what either request's path
+        happens to be. The tag is appended here, BEFORE calling
+        predict_async, because predict_async can resolve synchronously
+        (SynchronousExecutor, or its own no-backend/no-image early exits) --
+        appending first guarantees the tag is already there for
+        on_prediction_ready/on_prediction_failed to pop, however this call
+        resolves.
+        """
+        self._pending_requests.append(kind)
+        return self.service.predict_async(path, image)
+
+    def _pop_request_kind(self):
+        """Which flow ('interactive' or 'batch') the OLDEST outstanding
+        request belongs to -- see _dispatch_request. Every predict_async
+        dispatch in this controller goes through _dispatch_request, which
+        appends before submitting, so a result reaching on_prediction_ready/
+        on_prediction_failed always has a matching tag queued ahead of it;
+        the empty-queue case is defensive only (never observed) and falls
+        back to 'interactive' rather than raising, so a bug here degrades to
+        the ordinary stale-result guard instead of crashing the app.
+        """
+        if self._pending_requests:
+            return self._pending_requests.pop(0)
+        return 'interactive'
 
     def on_prediction_ready(self, image_path, detections):
         """UI thread (queued signal): safe to build Shapes and touch the canvas."""
-        if self._is_batch_result(image_path):
-            self._advance_batch(image_path, least_confidence(detections))
+        if self._pop_request_kind() == 'batch':
+            if self._batch_active:
+                self._advance_batch(image_path, least_confidence(detections))
+            else:
+                logger.info('Dropping late batch result for %r (batch already '
+                            'finished/was cancelled)', image_path)
             return
         if not self._is_current(image_path):
             return
@@ -483,12 +546,16 @@ class AssistController(QObject):
         self.refresh_actions()
 
     def on_prediction_failed(self, image_path, reason):
-        if self._is_batch_result(image_path):
-            logger.info('Batch scoring: %r failed (%s); recording max uncertainty '
-                        '("could not be scored" is exactly the case a human most '
-                        'needs to look at -- same reasoning as least_confidence\'s '
-                        'no-detection case).', image_path, reason)
-            self._advance_batch(image_path, 1.0)
+        if self._pop_request_kind() == 'batch':
+            if self._batch_active:
+                logger.info('Batch scoring: %r failed (%s); recording max uncertainty '
+                            '("could not be scored" is exactly the case a human most '
+                            'needs to look at -- same reasoning as least_confidence\'s '
+                            'no-detection case).', image_path, reason)
+                self._advance_batch(image_path, 1.0)
+            else:
+                logger.info('Dropping late failed batch result for %r (batch '
+                            'already finished/was cancelled)', image_path)
             return
         if not self._is_current(image_path):
             return
@@ -505,35 +572,6 @@ class AssistController(QObject):
         logger.info('Dropping stale prediction for %r (current image is %r)',
                     image_path, current)
         return False
-
-    def _is_batch_result(self, image_path):
-        """DESIGN POINT B -- batch predictions are, by definition, for images
-        OTHER than the one on screen (the whole point is to score the folder,
-        not the current image), so the ordinary stale-result guard
-        (``_is_current``) would drop every single one of them. This check
-        runs FIRST, ahead of ``_is_current``, and routes a batch result to
-        the batch collector on its own terms: "does this path match the ONE
-        request the batch is currently waiting on", never "does it match the
-        currently open file".
-
-        Mechanism chosen for keeping this from EVER double-firing together
-        with the interactive suggestion flow: while a batch is active,
-        ``refresh_actions`` disables ``auto_label_image`` (see there), so no
-        NEW interactive request can be issued during a run -- the single-
-        worker pool therefore has at most one request in flight for the
-        whole duration of a batch, and it is always the batch's own. A
-        result for the image that happens to be open right now is claimed
-        HERE (never reaching the interactive branch below), and once
-        ``_batch_current_path`` is cleared by ``_advance_batch`` it stops
-        matching, so a later, unrelated interactive result for that same
-        path (once auto-label is re-enabled after the batch finishes) is
-        free to go through ``_is_current`` normally. "Batch owns the
-        service" only for the single in-flight slot, not by taking over
-        ``InferenceService`` itself -- there is nothing to hand back.
-        """
-        return (self._batch_active
-                and self._batch_current_path is not None
-                and image_path == self._batch_current_path)
 
     # -- suggestions -------------------------------------------------------
 
@@ -812,7 +850,7 @@ class AssistController(QObject):
         # via a queued signal). Either way _advance_batch is only ever called
         # from on_prediction_ready/on_prediction_failed, never from here, so
         # a synchronous resolution cannot double-advance the queue.
-        self.service.predict_async(path, image)
+        self._dispatch_request('batch', path, image)
 
     def _advance_batch(self, path, score):
         self._uncertainty[path] = score

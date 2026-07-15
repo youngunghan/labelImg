@@ -73,9 +73,9 @@
 | `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:58, 181-184`) |
 | `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:59, 185-188`) |
 | (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:200-232, 299-316`) |
-| `Ctrl+Shift+U` | **Sort by Uncertainty** (Phase 4, 신규) — 폴더 전체 배치 채점 결과로 `m_img_list`를 불확실성 내림차순 재정렬(`SHORTCUT_SORT_BY_UNCERTAINTY`, `controller.py:71`; `sort_by_uncertainty`, `:869-893`). 현재 열린 이미지는 그대로 선택 유지 |
-| (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:719-782`) |
-| (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:905-928`) |
+| `Ctrl+Shift+U` | **Sort by Uncertainty** (Phase 4, 신규) — 폴더 전체 배치 채점 결과로 `m_img_list`를 불확실성 내림차순 재정렬(`SHORTCUT_SORT_BY_UNCERTAINTY`, `controller.py:71`; `sort_by_uncertainty`, `:907-931`). 현재 열린 이미지는 그대로 선택 유지 |
+| (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:757-820`) |
+| (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:943-966`) |
 
 > 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1040`) → [formats.md](formats.md) · [modules.md](modules.md).
 >

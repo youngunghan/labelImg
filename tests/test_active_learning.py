@@ -59,6 +59,32 @@ class VaryingUncertaintyStub(ModelBackend):
         return [Detection(label='x', box=(0, 0, 1, 1), score=0.8)]
 
 
+class _SequencedBackend(ModelBackend):
+    """Returns the next score from a fixed list on each successive
+    ``predict()`` call, regardless of image content.
+
+    ``VaryingUncertaintyStub`` keys its answer off image WIDTH, so two
+    requests for the SAME image path always get the SAME detections --
+    useless for telling apart which of two in-flight requests for one path
+    a given result actually came from. This backend keys off CALL ORDER
+    instead, which is exactly what the interactive/batch request-race
+    regression test needs to prove.
+    """
+
+    name = 'sequenced'
+    supports_detection = True
+    supports_segmentation = False
+
+    def __init__(self, scores):
+        self._scores = list(scores)
+        self.calls = 0
+
+    def predict(self, image):
+        score = self._scores[min(self.calls, len(self._scores) - 1)]
+        self.calls += 1
+        return [Detection(label='x', box=(0, 0, 1, 1), score=score)]
+
+
 def _deferred_executor():
     """An executor that records jobs instead of running them, so a test can
     control exactly when each batch step "completes" -- mirrors the idiom in
@@ -194,6 +220,67 @@ class TestBatchScoring(ActiveLearningTestCase):
         self.assertEqual([], self.win.canvas.shapes, 'batch result leaked into suggestions')
         # Batch advanced to the next image.
         self.assertEqual(self.path('b.png'), self.win.assist._batch_current_path)
+
+    def test_interactive_request_outstanding_when_a_batch_starts_is_not_misattributed(self):
+        # Reproduces the interactive/batch request-race: an interactive
+        # (Ctrl+I) request for the CURRENTLY open image is still queued --
+        # not yet resolved -- when Score Folder starts, and the batch's own
+        # first request happens to target that SAME path (a.png is both the
+        # open image and first in scan order). InferenceService's
+        # single-worker pool QUEUES rather than rejects the second request,
+        # so both are in flight together.
+        #
+        # Routing a result by bare path equality against
+        # ``_batch_current_path`` (the pre-fix behaviour) cannot tell these
+        # two requests apart: the FIRST result to arrive (the interactive
+        # one, FIFO) gets consumed as the batch's own progress, and the
+        # batch's real result -- arriving after the batch has (wrongly)
+        # already advanced past a.png -- gets injected into the interactive
+        # suggestion flow instead, even though auto-label is supposed to be
+        # disabled for the whole run. Tagging every dispatch by ORDER
+        # (_dispatch_request / _pop_request_kind), not by path, is what
+        # keeps the two apart correctly regardless of timing.
+        backend = _SequencedBackend([0.9, 0.1])  # call 1: interactive, call 2: batch
+        self.launch(backend=backend)
+        executor, jobs = _deferred_executor()
+        self.win.inference_service.set_executor(executor)
+
+        self.assertEqual(self.path('a.png'), self.win.file_path)
+        self.win.assist.auto_label_image()  # request #1: interactive, a.png
+        self.assertEqual(1, len(jobs))
+
+        self.win.assist.score_folder()  # request #2: batch, a.png (first in scan order)
+        self.assertEqual(2, len(jobs))
+        self.assertEqual(self.path('a.png'), self.win.assist._batch_current_path)
+
+        jobs.pop(0)()  # request #1 (interactive) resolves first -- FIFO
+
+        # The interactive result (score 0.9) must be shown as an ordinary
+        # suggestion, and must NOT be consumed as the batch's own progress
+        # for a.png.
+        self.assertEqual(self.path('a.png'), self.win.assist._batch_current_path,
+                         "interactive result for a.png was wrongly consumed as "
+                         "the batch's own progress")
+        self.assertNotIn(self.path('a.png'), self.win.assist._uncertainty)
+        self.assertEqual([Detection(label='x', box=(0, 0, 1, 1), score=0.9)],
+                         self.win.assist._detections)
+
+        jobs.pop(0)()  # request #2 (the batch's own, real result) resolves next
+
+        # The batch's own result -- computed from the SECOND predict() call
+        # (score 0.1) -- must be the one recorded, and the batch must
+        # advance normally.
+        self.assertIn(self.path('a.png'), self.win.assist._uncertainty)
+        self.assertAlmostEqual(1 - 0.1, self.win.assist._uncertainty[self.path('a.png')])
+        self.assertEqual(self.path('b.png'), self.win.assist._batch_current_path)
+
+        # And it must NOT leak into / overwrite the interactive suggestion
+        # flow: the suggestion shown for a.png is still the one the user
+        # actually asked for (score 0.9), not the batch's own leftover data.
+        self.assertEqual([Detection(label='x', box=(0, 0, 1, 1), score=0.9)],
+                         self.win.assist._detections,
+                         "batch result for a.png leaked into the interactive "
+                         "suggestion flow")
 
     def test_interactive_auto_label_is_disabled_while_a_batch_is_running(self):
         executor, jobs = _deferred_executor()
