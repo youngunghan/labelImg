@@ -26,12 +26,12 @@ write into B's annotation file as ground truth.
 import logging
 
 try:
-    from PyQt5.QtCore import QObject, Qt
+    from PyQt5.QtCore import QObject, Qt, QTimer
     from PyQt5.QtGui import QColor, QImageReader
     from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QListWidgetItem, QSlider,
                                  QWidget, QWidgetAction)
 except ImportError:  # pragma: no cover - the app's PyQt4 fallback path
-    from PyQt4.QtCore import QObject, Qt
+    from PyQt4.QtCore import QObject, Qt, QTimer
     from PyQt4.QtGui import (QColor, QHBoxLayout, QImageReader, QLabel,
                              QListWidgetItem, QSlider, QWidget, QWidgetAction)
 
@@ -386,9 +386,17 @@ class AssistController(QObject):
             self.action_threshold.setEnabled(available)
 
         # Score Folder stays enabled WHILE a batch is running (see above) --
-        # triggering it again is exactly how the run is cancelled.
+        # triggering it again is exactly how the run is cancelled. Gating
+        # purely on has_folder would strand a running batch: if m_img_list
+        # empties (or shrinks) out from under the batch WHILE it runs (e.g.
+        # every remaining image gets classified away), has_folder goes
+        # False and this action -- the ONLY control that can cancel a
+        # running batch -- would grey itself out with the batch still
+        # active, leaving the user with no way to stop it. batch_running is
+        # ORed in so cancellation stays reachable for the batch's whole
+        # duration regardless of what happens to m_img_list.
         if self.action_score_folder is not None:
-            self.action_score_folder.setEnabled(available and has_folder)
+            self.action_score_folder.setEnabled(available and (has_folder or batch_running))
         if self.action_sort is not None:
             self.action_sort.setEnabled(available and bool(self._uncertainty) and not batch_running)
         if self.action_restore_order is not None:
@@ -841,7 +849,24 @@ class AssistController(QObject):
             # waiting on a request that was never dispatched -- consistent
             # with least_confidence's own "could not tell = worth a look"
             # stance on empty detections.
-            self._advance_batch(path, 1.0)
+            #
+            # CRASH FIX: this branch reaches _advance_batch DIRECTLY, in the
+            # SAME stack frame as this very call to _batch_step -- unlike
+            # on_prediction_ready/on_prediction_failed below, which only ever
+            # run from a (queued) Qt signal, i.e. a FRESH stack frame per
+            # result, there is no such boundary here. _advance_batch's own
+            # tail call is what steps to the next image, so a run of many
+            # CONSECUTIVE unreadable/missing files would otherwise chain
+            # _batch_step -> _advance_batch -> _batch_step -> ... in one
+            # unbroken synchronous call stack -- never returning to the
+            # event loop the way the async predict path always does --
+            # until Python's recursion limit raises RecursionError and takes
+            # the whole batch (and potentially the app) down with it.
+            # synchronous=False defers only the NEXT _batch_step() call via
+            # QTimer.singleShot(0, ...), which posts it as a fresh event-loop
+            # iteration instead of a nested call, breaking the chain while
+            # still processing images strictly in order on the UI thread.
+            self._advance_batch(path, 1.0, synchronous=False)
             return
 
         # predict_async may resolve SYNCHRONOUSLY -- the tests' executor runs
@@ -852,14 +877,30 @@ class AssistController(QObject):
         # a synchronous resolution cannot double-advance the queue.
         self._dispatch_request('batch', path, image)
 
-    def _advance_batch(self, path, score):
+    def _advance_batch(self, path, score, synchronous=True):
+        """Record one image's score and step to the next.
+
+        ``synchronous=False`` (used only by _batch_step's load-failure
+        branch -- see its comment) defers the next ``_batch_step()`` call to
+        a fresh Qt event-loop iteration via ``QTimer.singleShot(0, ...)``
+        instead of calling it inline, which is what stops a run of
+        consecutive failures from recursing the call stack without bound.
+        The default (``True``, used by on_prediction_ready/on_prediction_failed,
+        which only ever run from a queued Qt signal -- already a fresh stack
+        frame per result) is unchanged: those call sites cannot recurse this
+        way, and posting them through the event loop too would only add a
+        pointless extra round trip per image.
+        """
         self._uncertainty[path] = score
         self._invalidate_ranks()
         self._batch_scored += 1
         self._batch_index += 1
         self._batch_current_path = None
         self._update_batch_action_text()
-        self._batch_step()
+        if synchronous:
+            self._batch_step()
+        else:
+            QTimer.singleShot(0, self._batch_step)
 
     def _finish_batch(self):
         scored = self._batch_scored
@@ -984,7 +1025,18 @@ class AssistController(QObject):
         A no-op when no sort is active (the common case): plain filesystem
         order from the scan is left standing, which is what
         on_directory_scanned's reset already expects for a fresh folder.
+
+        Invalidates the rank cache UNCONDITIONALLY, before the no-op check
+        above: scan_all_images has just replaced m_img_list's MEMBERSHIP
+        (an image may have left via classify/delete, or returned via undo),
+        and _ranks()/refresh_file_list's scored-count now compute over the
+        INTERSECTION of _uncertainty and m_img_list -- so a stale cache
+        built from the old membership would keep showing a rank/total that
+        includes an image no longer in the folder, or omits one that just
+        came back, even though _uncertainty itself did not change (which is
+        the only thing _invalidate_ranks is normally called for).
         """
+        self._invalidate_ranks()
         if not self._sort_active:
             return
         self.app.m_img_list.sort(key=self._sort_key)
@@ -1069,19 +1121,45 @@ class AssistController(QObject):
         individual rows in place: row i must keep mirroring m_img_list[i] for
         every other piece of navigation, and a full rebuild is the only way
         that is guaranteed after m_img_list has been reordered.
+
+        Repopulating clears the widget's selection, so the currently open
+        image's row is reselected afterwards -- reusing the exact mechanism
+        load_file's own highlight uses (``item.setSelected(True)`` on the
+        row at ``m_img_list.index(file_path)``). Without this, a row
+        selection set by load_file (or file_item_double_clicked) BEFORE this
+        rebuild runs is simply thrown away by ``widget.clear()``, and
+        nothing sets it again -- exactly what happened on a genuine Open
+        Directory: import_dir_images clears the widget, then open_next_image
+        (-> load_file) sets the highlight while the widget is still EMPTY
+        (refresh_file_list has not repopulated it yet), so the highlight is
+        set on nothing and lost the moment this method runs.
         """
         widget = getattr(self.app, 'file_list_widget', None)
         if widget is None:  # pragma: no cover - defensive; always set by MainWindow
             return
         widget.clear()
         ranks = self._ranks()
-        total_scored = len(self._uncertainty)
+        # Total among SCORED images still present in the folder, not raw
+        # len(_uncertainty): an entry for a path that left m_img_list
+        # (classify-out) is deliberately kept in _uncertainty so undo can
+        # restore its score (see _uncertainty's own comment), but it must
+        # not keep inflating the "scored N" count or leave a rank number
+        # referencing an image no longer in the list -- _ranks() already
+        # excludes it, so len(ranks) is exactly the present-and-scored count.
+        total_scored = len(ranks)
         for image_path in self.app.m_img_list:
             item = QListWidgetItem(self._list_item_text(image_path, ranks, total_scored))
             color = self._heat_color(image_path)
             if color is not None:
                 item.setBackground(color)
             widget.addItem(item)
+
+        current_path = getattr(self.app, 'file_path', None)
+        if current_path and current_path in self.app.m_img_list:
+            index = self.app.m_img_list.index(current_path)
+            current_item = widget.item(index)
+            if current_item is not None:
+                current_item.setSelected(True)
 
     def _list_item_text(self, image_path, ranks, total_scored):
         """Item text stays the bare path when unscored (this is what
@@ -1116,12 +1194,31 @@ class AssistController(QObject):
         return QColor(red, green, blue)
 
     def _ranks(self):
-        """path -> 1-based rank among SCORED images, most uncertain first.
+        """path -> 1-based rank among SCORED images STILL PRESENT in
+        ``self.app.m_img_list``, most uncertain first.
+
+        Deliberately excludes any ``_uncertainty`` entry whose path has left
+        m_img_list (classify-out, delete): those entries are kept in
+        ``_uncertainty`` on purpose, so undo_classify can restore the exact
+        old score for an image that comes back (see ``_uncertainty``'s own
+        comment) -- but until an image is actually back in the folder, it
+        must not count toward the rank/total shown to the user, or the
+        displayed numbers drift from what is really in the file list.
+
         One sort for the whole file-list refresh / status-label update
-        (cached until _uncertainty changes), not one re-sort per row.
+        (cached until invalidated). Invalidated both when _uncertainty
+        itself changes (_invalidate_ranks, e.g. a new score recorded) AND
+        whenever m_img_list's MEMBERSHIP may have changed without
+        _uncertainty changing (reapply_sort_if_active invalidates
+        unconditionally for exactly this reason) -- either one can change
+        which entries belong in this intersection.
         """
         if self._ranks_cache is None:
-            ordered = sorted(self._uncertainty.items(), key=lambda kv: -kv[1])
+            present = set(self.app.m_img_list)
+            ordered = sorted(
+                ((path, score) for path, score in self._uncertainty.items()
+                 if path in present),
+                key=lambda kv: -kv[1])
             self._ranks_cache = {path: i for i, (path, _score) in enumerate(ordered, start=1)}
         return self._ranks_cache
 
@@ -1143,8 +1240,9 @@ class AssistController(QObject):
             self._score_label.setText('')
             self._score_label.setToolTip('')
             return
-        rank = self._ranks().get(path)
-        total = len(self._uncertainty)
+        ranks = self._ranks()
+        rank = ranks.get(path)
+        total = len(ranks)
         self._score_label.setText('Uncertainty %.2f (rank %d/%d)' % (score, rank, total))
         self._score_label.setToolTip(
             'Active-learning uncertainty score for the open image -- '

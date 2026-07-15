@@ -503,5 +503,196 @@ class TestNoBackendActiveLearning(unittest.TestCase):
         self.assertEqual([], self.errors)
 
 
+class TestBatchLoadFailureDoesNotRecurse(ActiveLearningTestCase):
+    """Regression for the recursion-crash fix on `_batch_step`'s
+    load-failure branch (see controller.py's own comment on that branch,
+    and `_advance_batch`'s `synchronous` parameter).
+
+    The OLD (buggy) behaviour called `_advance_batch(path, 1.0)` with the
+    default `synchronous=True`, which tail-calls `_batch_step()` INLINE, in
+    the same stack frame -- so a run of many consecutive unreadable/missing
+    images chains `_batch_step -> _advance_batch -> _batch_step -> ...` in
+    one unbroken synchronous call stack, never returning to the event loop,
+    until Python's recursion limit raises RecursionError. The FIX defers the
+    next `_batch_step()` call via `QTimer.singleShot(0, ...)` instead
+    (`synchronous=False`), which posts it as a fresh event-loop iteration.
+
+    N is picked large enough (700) that the OLD behaviour reliably blows
+    Python's default recursion limit (1000; each failed image costs ~2 stack
+    frames in the old code, so 700 images is ~1400 frames -- comfortably
+    over the limit) well before finishing, while the FIXED behaviour handles
+    it trivially since the stack never grows between images.
+    """
+
+    N = 700
+
+    def _make_unreadable_images(self, n):
+        # Zero-byte files: QImageReader.read() fails/returns a null QImage
+        # for these SILENTLY (no dialog) -- this is exactly what
+        # `_load_model_image` (the batch path) relies on; it is the
+        # INTERACTIVE `load_file` path (not exercised here) that would pop a
+        # modal dialog on an invalid image. See this module's HARD SAFETY
+        # notes: batch scoring must never reach `load_file`/`error_message`.
+        bad_dir = os.path.join(self.tmp.name, 'unreadable')
+        os.makedirs(bad_dir, exist_ok=True)
+        paths = []
+        for i in range(n):
+            p = os.path.join(bad_dir, 'bad_%04d.png' % i)
+            with open(p, 'wb') as fh:
+                fh.write(b'')
+            paths.append(p)
+        return paths
+
+    def _drain_deferred_batch(self, max_iterations):
+        """Pump the Qt event loop until the batch finishes or
+        `max_iterations` is exhausted. The load-failure branch never reaches
+        `predict_async()` (so the SynchronousExecutor idiom used elsewhere in
+        this module does not apply here) -- it is driven purely by
+        `QTimer.singleShot(0, self._batch_step)`, which only fires when the
+        event loop is actually pumped, hence the bounded `processEvents()`
+        loop rather than a single call."""
+        for _ in range(max_iterations):
+            if not self.win.assist._batch_active:
+                return True
+            QApplication.processEvents()
+        return not self.win.assist._batch_active
+
+    def test_batch_completes_over_many_consecutive_unreadable_images(self):
+        paths = self._make_unreadable_images(self.N)
+        self.win.m_img_list = paths
+        self.win.img_count = len(paths)
+
+        self.assertTrue(self.win.assist.score_folder())
+        self.assertTrue(self.win.assist._batch_active)
+
+        finished = self._drain_deferred_batch(self.N * 3 + 200)
+        self.assertTrue(
+            finished,
+            'batch never completed -- the deferred QTimer steps did not '
+            'drive it to finish (a hang here means a broken deferral or a '
+            'modal dialog, not a RecursionError -- a RecursionError would '
+            'instead raise out of this test as an exception)')
+
+        self.assertFalse(self.win.assist._batch_active)
+        self.assertEqual(self.N, len(self.win.assist._uncertainty))
+        for p in paths:
+            self.assertAlmostEqual(1.0, self.win.assist._uncertainty[p])
+        # HARD SAFETY: batch scoring of unreadable images must NEVER show a
+        # modal dialog (see this module's docstring and the task's safety
+        # rule) -- error_message is stubbed in ActiveLearningTestCase.launch
+        # precisely so any accidental reach of it is caught here instead of
+        # blocking the run.
+        self.assertEqual([], self.errors)
+
+
+class TestScoreFolderStaysEnabledWhenFolderEmptiesMidBatch(ActiveLearningTestCase):
+    """Regression: Score Folder is the ONLY control that can cancel a
+    running batch (see `create_actions`' tooltip and
+    `_update_batch_action_text`'s label swap). If `m_img_list` empties out
+    from under a running batch (e.g. every remaining image gets classified
+    away while scoring is in progress), gating the action purely on
+    `has_folder` would strand the user with no way to stop it -- see
+    `refresh_actions`' own comment on `batch_running` being ORed in."""
+
+    def test_score_folder_action_stays_enabled_when_m_img_list_empties_during_a_batch(self):
+        executor, jobs = _deferred_executor()
+        self.win.inference_service.set_executor(executor)
+
+        self.win.assist.score_folder()
+        self.assertTrue(self.win.assist._batch_active)
+        self.assertTrue(self.win.assist.action_score_folder.isEnabled())
+
+        # The batch itself walks a frozen snapshot (_batch_snapshot), so it
+        # keeps running even though m_img_list -- which MainWindow owns --
+        # is emptied out from under it here.
+        self.win.m_img_list = []
+        self.win.assist.refresh_actions()
+
+        self.assertTrue(self.win.assist._batch_active,
+                        'the batch must still be running (it does not read m_img_list mid-run)')
+        self.assertTrue(
+            self.win.assist.action_score_folder.isEnabled(),
+            'Score Folder is the ONLY control that can cancel a running batch -- '
+            'it must stay enabled even when m_img_list empties out from under it, '
+            'or cancellation becomes unreachable for the rest of the run')
+
+        # And it must still actually work as a cancel control from this state.
+        self.assertTrue(self.win.assist.cancel_batch_scoring())
+        self.assertFalse(self.win.assist._batch_active)
+
+
+class TestFileListSelectionAfterOpenDirectory(ActiveLearningTestCase):
+    """Regression: a genuine Open Directory must leave the newly-opened
+    image's row highlighted in the file list, not lose the selection.
+
+    `open_dir_dialog(..., silent=True)` exercises the REAL Open Directory
+    path (no QFileDialog popup, so this stays dialog-safe) -- it clears
+    `file_list_widget` and calls `import_dir_images` (`reset_active_learning`
+    defaults to True), which is exactly the "genuine (re)scan of a
+    directory" case `refresh_file_list`'s docstring describes: `load_file`'s
+    own highlight attempt runs while the widget is still EMPTY (repopulated
+    later by `refresh_file_list`), so the reselect must happen in
+    `refresh_file_list` itself, after repopulating, or the highlight is set
+    on nothing and lost."""
+
+    def test_current_row_stays_highlighted_after_a_genuine_open_directory(self):
+        self.win.open_dir_dialog(dir_path=self.dir, silent=True)
+
+        self.assertEqual(self.path('a.png'), self.win.file_path)
+        index = self.win.m_img_list.index(self.win.file_path)
+        item = self.win.file_list_widget.item(index)
+        self.assertIsNotNone(item)
+        self.assertTrue(item.isSelected(),
+                        "the open image's row must be highlighted after Open Directory")
+        selected = self.win.file_list_widget.selectedItems()
+        self.assertEqual([item], selected, 'exactly the open image\'s row must be selected')
+
+
+class TestRankAndTotalExcludeAbsentImages(ActiveLearningTestCase):
+    """Regression: `_ranks()` / the displayed "scored N" total must only
+    count images STILL PRESENT in `m_img_list`, not every path ever scored
+    -- an entry for a path that left the folder (classify-out, delete) is
+    deliberately KEPT in `_uncertainty` (so undo can restore it), but must
+    not keep inflating the rank/total shown to the user. See `_ranks()` and
+    `reapply_sort_if_active`'s own docstrings."""
+
+    def test_ranks_and_displayed_total_exclude_an_image_that_left_the_folder(self):
+        self.score_folder_sync()
+        self.assertEqual(4, len(self.win.assist._ranks()))
+
+        self.win.classify_current_image('good')  # removes a.png (the open image)
+
+        self.assertNotIn(self.path('a.png'), self.win.m_img_list)
+        # The score itself must be RETAINED, not deleted (undo needs it).
+        self.assertIn(self.path('a.png'), self.win.assist._uncertainty)
+
+        ranks_after = self.win.assist._ranks()
+        self.assertEqual(3, len(ranks_after),
+                         'rank/total must exclude a.png, which left the folder')
+        self.assertNotIn(self.path('a.png'), ranks_after)
+        for path in self.win.m_img_list:
+            self.assertIn(path, ranks_after)
+
+        # The file-list row text must reflect the present-only total (3),
+        # not raw len(_uncertainty) (still 4 -- a.png's score is kept).
+        b_index = self.win.m_img_list.index(self.path('b.png'))
+        b_text = self.win.file_list_widget.item(b_index).text()
+        self.assertIn('/3,', b_text,
+                      'row text must show the present-only total (3), not len(_uncertainty) (4)')
+
+    def test_undo_restores_the_score_and_rank_for_a_reclassified_image(self):
+        self.score_folder_sync()
+        self.win.classify_current_image('good')  # removes a.png
+        self.assertEqual(3, len(self.win.assist._ranks()))
+
+        self.win.undo_classify()
+
+        self.assertIn(self.path('a.png'), self.win.m_img_list)
+        ranks = self.win.assist._ranks()
+        self.assertEqual(4, len(ranks))
+        self.assertIn(self.path('a.png'), ranks)
+        self.assertAlmostEqual(1.0, self.win.assist._uncertainty[self.path('a.png')])
+
+
 if __name__ == '__main__':
     unittest.main()

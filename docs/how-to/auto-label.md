@@ -47,7 +47,7 @@ settings.save()
 
 키는 `model/backend` / `model/path` / `model/confThreshold`(`libs/constants.py:24-26`)다. 이후 앱을
 실행하면 `AssistController`가 시작할 때 이 설정을 읽어 백엔드를 구성한다
-(`AssistController.__init__`, `libs/assist/controller.py:85-129`). 신뢰도 임계값은 메뉴의 슬라이더로도
+(`AssistController.__init__`, `libs/assist/controller.py:85-219`). 신뢰도 임계값은 메뉴의 슬라이더로도
 바로 조절되고, 앱 종료 시 그 값이 같은 설정에 다시 저장된다(`labelImg.py:1451-1453`).
 
 ### 지원하는 모델 출력 형식
@@ -79,7 +79,7 @@ settings.save()
 - 기본 설치 상태(`pyqt5`+`lxml`만, `[ai]` extras도 설정도 없음)에서는 `Ctrl+I`를 눌러도 아무 일도
   일어나지 않는다 — AI 액션 자체가 처음부터 비활성화되어 있고, 메뉴 툴팁에 "No model backend
   configured" 안내가 뜬다(`NO_BACKEND_CONFIGURED_HINT`, `libs/assist/controller.py:85-88`,
-  `_unavailable_hint`/`refresh_actions`, `libs/assist/controller.py:234-245, 344-408`).
+  `_unavailable_hint`/`refresh_actions`, `libs/assist/controller.py:245-256, 355-426`).
 - **AI 메뉴를 켜려면** [위 절차](#내-onnx-모델을-앱에-연결하기)대로 `model/backend`를 `yolo_onnx`로,
   `model/path`를 실제 `.onnx` 파일 경로로 설정해야 한다 — `pip install -e ".[ai]"`(onnxruntime+numpy,
   이 저장소 루트에서 실행)도 함께 필요하다. 둘 중 하나라도 빠지면(익스트라 미설치, 경로 미설정, 파일 손상 등) `build_backend()`가
@@ -95,22 +95,22 @@ settings.save()
 1. **AI 메뉴**(`&AI`, `labelImg.py:478`·`504`)에서 **Confidence Threshold** 슬라이더로 원하는 신뢰도
    임계값을 미리 맞춰도 되고, 나중에 결과를 보면서 조절해도 된다(0~100%, 기본 50%).
 2. **`Ctrl+I`** (`Auto-label Image`) — 현재 이미지에 모델을 돌려 박스를 **제안**으로 올린다
-   (`SHORTCUT_AUTO_LABEL`, `libs/assist/controller.py:57`). 이미지가 열려 있고 백엔드가 사용 가능할 때만
+   (`SHORTCUT_AUTO_LABEL`, `libs/assist/controller.py:59`). 이미지가 열려 있고 백엔드가 사용 가능할 때만
    활성화된다. 다시 누르면 이전 라운드의 제안을 지우고 새로 돌린다(`auto_label_image`,
-   `libs/assist/controller.py:459-481`).
+   `libs/assist/controller.py:467-488`).
 3. 제안 박스는 **점선 + 반투명**으로 그려져 실제 박스와 한눈에 구별된다(`Shape.provisional`,
    `libs/shape.py:62`,`110`,`132`,`159-162`). 각 제안에는 모델이 매긴 신뢰도(`Shape.confidence`)가 함께
    붙는다.
 4. **Confidence Threshold** 슬라이더를 움직이면 이미 받은 검출 결과 중 임계값 이상인 것만 다시
    그려진다 — **모델을 다시 돌리지 않는다**(`AssistController.set_threshold`/`_sync_suggestions`,
-   `libs/assist/controller.py:438-458`,`619-655`). 슬라이더는 탐색용이라 실시간으로 켜고 끌 수 있다.
+   `libs/assist/controller.py:446-463`,`627-662`). 슬라이더는 탐색용이라 실시간으로 켜고 끌 수 있다.
 5. **`Ctrl+Return`** (`Accept All Suggestions`) — 화면의 모든 제안을 한 번에 **진짜 박스로 승격**한다.
    승격된 박스는 점선/반투명이 풀리고 일반 색으로 바뀌며, 라벨이 클래스 목록에 없었다면 자동으로
-   추가된다(`accept_all`, `libs/assist/controller.py:656-676`).
+   추가된다(`accept_all`, `libs/assist/controller.py:664-683`).
 6. **`Ctrl+Backspace`** (`Reject All Suggestions`) — 화면의 모든 제안을 한 번에 버린다(`reject_all`,
-   `libs/assist/controller.py:677-689`).
+   `libs/assist/controller.py:685-696`).
 7. 물론 제안 하나하나를 캔버스에서 골라 `Delete`로 개별적으로 지울 수도 있다 — 지운 제안은 임계값을
-   다시 움직여도 되살아나지 않는다(`discard_shape`, `libs/assist/controller.py:600-618`).
+   다시 움직여도 되살아나지 않는다(`discard_shape`, `libs/assist/controller.py:608-625`).
 
 ## 제안은 받아들이기 전까지 저장되지 않는다
 
@@ -131,7 +131,7 @@ shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.provi
 
 - 예측은 UI 스레드를 막지 않는 별도 워커에서 돈다(`InferenceService`, 단일 워커 QThreadPool). 추론 중에
   다른 이미지로 넘어가면, 이미 떠난 이미지에 대한 느린 결과가 나중에 도착해도 **현재 이미지와 경로가
-  다르면 조용히 버려진다**(`AssistController._is_current`, `libs/assist/controller.py:565-577`) — 새
+  다르면 조용히 버려진다**(`AssistController._is_current`, `libs/assist/controller.py:573-582`) — 새
   이미지에 엉뚱한 박스가 얹히는 사고를 막는다.
 - `Ctrl+D`(Duplicate)로 제안을 복제하면 복제본도 `provisional`을 물려받아 그대로 점선/반투명으로
   남는다(`Shape.copy`, `libs/shape.py:220`,`234-236`) — 저장하려면 마찬가지로 받아들여야 한다.
