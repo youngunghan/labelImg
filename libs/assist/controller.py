@@ -191,16 +191,30 @@ class AssistController(QObject):
         self._batch_total = 0
         self._batch_scored = 0
         self._batch_current_path = None
+        # Bumped every time a batch run's IDENTITY changes -- a fresh run
+        # starting (score_folder), or the current run ending/invalidating
+        # (cancel_batch_scoring, on_directory_scanned, _finish_batch). Tags
+        # each batch dispatch (see _dispatch_request) so a result belonging
+        # to a run that has since been superseded by a NEWER run (not merely
+        # "no run right now", which `_batch_active` alone already covers) is
+        # detectable -- see on_prediction_ready/on_prediction_failed.
+        self._batch_generation = 0
 
-        # FIFO of 'interactive'/'batch' tags, one appended per predict_async
+        # FIFO of (kind, generation) tags, one appended per predict_async
         # dispatch (_dispatch_request) and popped by on_prediction_ready /
         # on_prediction_failed (_pop_request_kind). InferenceService's single
-        # worker resolves requests strictly in submission order, so this is
-        # what tells an interactive result and a batch result apart CORRECTLY
-        # even when a Ctrl+I request is still outstanding when score_folder()
-        # starts and both happen to target the same image path -- routing by
-        # bare path equality (the pre-fix approach) misattributes exactly
-        # that race. See _dispatch_request for the full reasoning.
+        # worker resolves requests strictly in submission order, so the KIND
+        # half of the tag is what tells an interactive result and a batch
+        # result apart CORRECTLY even when a Ctrl+I request is still
+        # outstanding when score_folder() starts and both happen to target
+        # the same image path -- routing by bare path equality (the pre-fix
+        # approach) misattributes exactly that race. The GENERATION half
+        # (interactive dispatches carry ``None``) does the same job for two
+        # BATCH runs: a result whose generation does not match
+        # ``self._batch_generation`` at pop time belongs to a run that has
+        # since been cancelled/replaced, even though ``_batch_active`` is
+        # true again for the NEWER run by the time it arrives -- see
+        # _dispatch_request for the full reasoning.
         self._pending_requests = []
 
         self.action_score_folder = None
@@ -487,7 +501,7 @@ class AssistController(QObject):
         self.app.status('Running the model on %s...' % file_path)
         return self._dispatch_request('interactive', file_path, image)
 
-    def _dispatch_request(self, kind, path, image):
+    def _dispatch_request(self, kind, path, image, generation=None):
         """Submit one predict_async request, tagged with which flow started
         it ('interactive' or 'batch') -- the ONLY call sites are here and
         _batch_step, and every dispatch must go through one of them.
@@ -514,32 +528,43 @@ class AssistController(QObject):
         appending first guarantees the tag is already there for
         on_prediction_ready/on_prediction_failed to pop, however this call
         resolves.
+
+        ``generation`` (batch dispatches only -- _batch_step passes
+        ``self._batch_generation``; interactive dispatches leave it ``None``)
+        is the BATCH-vs-BATCH half of the fix: kind alone tells an
+        interactive result apart from a batch one, but not one batch RUN's
+        result apart from a DIFFERENT batch run's, once the first run was
+        cancelled and a second one started before its stale result arrived
+        -- see on_prediction_ready/on_prediction_failed.
         """
-        self._pending_requests.append(kind)
+        self._pending_requests.append((kind, generation))
         return self.service.predict_async(path, image)
 
     def _pop_request_kind(self):
-        """Which flow ('interactive' or 'batch') the OLDEST outstanding
-        request belongs to -- see _dispatch_request. Every predict_async
-        dispatch in this controller goes through _dispatch_request, which
-        appends before submitting, so a result reaching on_prediction_ready/
+        """(kind, generation) the OLDEST outstanding request belongs to --
+        see _dispatch_request. Every predict_async dispatch in this
+        controller goes through _dispatch_request, which appends before
+        submitting, so a result reaching on_prediction_ready/
         on_prediction_failed always has a matching tag queued ahead of it;
         the empty-queue case is defensive only (never observed) and falls
-        back to 'interactive' rather than raising, so a bug here degrades to
-        the ordinary stale-result guard instead of crashing the app.
+        back to ``('interactive', None)`` rather than raising, so a bug here
+        degrades to the ordinary stale-result guard instead of crashing the
+        app.
         """
         if self._pending_requests:
             return self._pending_requests.pop(0)
-        return 'interactive'
+        return ('interactive', None)
 
     def on_prediction_ready(self, image_path, detections):
         """UI thread (queued signal): safe to build Shapes and touch the canvas."""
-        if self._pop_request_kind() == 'batch':
-            if self._batch_active:
+        kind, generation = self._pop_request_kind()
+        if kind == 'batch':
+            if self._batch_active and generation == self._batch_generation:
                 self._advance_batch(image_path, least_confidence(detections))
             else:
                 logger.info('Dropping late batch result for %r (batch already '
-                            'finished/was cancelled)', image_path)
+                            'finished/was cancelled, or superseded by a newer '
+                            'run)', image_path)
             return
         if not self._is_current(image_path):
             return
@@ -554,8 +579,9 @@ class AssistController(QObject):
         self.refresh_actions()
 
     def on_prediction_failed(self, image_path, reason):
-        if self._pop_request_kind() == 'batch':
-            if self._batch_active:
+        kind, generation = self._pop_request_kind()
+        if kind == 'batch':
+            if self._batch_active and generation == self._batch_generation:
                 logger.info('Batch scoring: %r failed (%s); recording max uncertainty '
                             '("could not be scored" is exactly the case a human most '
                             'needs to look at -- same reasoning as least_confidence\'s '
@@ -563,7 +589,8 @@ class AssistController(QObject):
                 self._advance_batch(image_path, 1.0)
             else:
                 logger.info('Dropping late failed batch result for %r (batch '
-                            'already finished/was cancelled)', image_path)
+                            'already finished/was cancelled, or superseded by '
+                            'a newer run)', image_path)
             return
         if not self._is_current(image_path):
             return
@@ -803,6 +830,13 @@ class AssistController(QObject):
         self._batch_scored = 0
         self._batch_current_path = None
         self._batch_active = True
+        # A fresh run is a fresh identity: bump BEFORE the first dispatch, so
+        # every request this run makes (_batch_step -> _dispatch_request)
+        # carries the NEW generation, distinguishing them from any request a
+        # just-cancelled/just-finished previous run may still have
+        # outstanding -- see _pending_requests' docstring in __init__ and
+        # on_prediction_ready/on_prediction_failed.
+        self._batch_generation += 1
         self.refresh_actions()  # disables auto-label; flips this action's label
         self._batch_step()
         return True
@@ -820,6 +854,11 @@ class AssistController(QObject):
         self._batch_current_path = None
         self._batch_snapshot = []
         self._batch_index = 0
+        # Invalidates this run's identity: any request it still has
+        # outstanding now carries a STALE generation, so a late result for it
+        # is dropped even if a new run starts (and flips _batch_active back
+        # to True) before that result arrives -- see on_prediction_ready.
+        self._batch_generation += 1
         self.app.status('Uncertainty scoring cancelled (%d/%d image(s) scored).'
                         % (scored, total))
         self.refresh_file_list()
@@ -875,7 +914,7 @@ class AssistController(QObject):
         # via a queued signal). Either way _advance_batch is only ever called
         # from on_prediction_ready/on_prediction_failed, never from here, so
         # a synchronous resolution cannot double-advance the queue.
-        self._dispatch_request('batch', path, image)
+        self._dispatch_request('batch', path, image, self._batch_generation)
 
     def _advance_batch(self, path, score, synchronous=True):
         """Record one image's score and step to the next.
@@ -908,6 +947,13 @@ class AssistController(QObject):
         self._batch_current_path = None
         self._batch_snapshot = []
         self._batch_index = 0
+        # Same reasoning as cancel_batch_scoring's bump: a normal finish also
+        # ends this run's identity, so a duplicate/late result somehow still
+        # in flight for it (should not happen -- _batch_index only reaches
+        # len(snapshot) after every dispatched request has been popped -- but
+        # this keeps the invariant explicit rather than relying on that) is
+        # recognised as stale rather than matching a future run by accident.
+        self._batch_generation += 1
         self.app.status('Scored %d image(s) for uncertainty -- Sort by Uncertainty '
                         'is ready.' % scored)
         self.refresh_file_list()

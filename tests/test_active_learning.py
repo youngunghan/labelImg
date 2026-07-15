@@ -461,6 +461,129 @@ class TestCancellation(ActiveLearningTestCase):
         self.assertTrue(result, 'score_folder() delegates to cancel_batch_scoring(), which succeeded')
         self.assertFalse(self.win.assist._batch_active)
 
+    def test_stale_result_from_a_cancelled_run_is_not_misattributed_to_the_next_run(self):
+        """The batch-vs-batch race: unlike
+        test_a_late_result_after_cancellation_does_not_crash_or_reactivate_the_batch
+        above (which DRAINS the stale result before starting a new run, so it
+        never actually exercises this), here run 1's first request is left
+        OUTSTANDING when it is cancelled, run 2 is started (dispatching its
+        OWN first request for the same path), and only THEN does run 1's
+        stale result arrive.
+
+        Both requests are tagged 'batch' by _dispatch_request/_pop_request_kind's
+        FIFO scheme -- that already tells a batch result apart from an
+        interactive one, but NOT run 1's batch progress apart from run 2's:
+        by the time run 1's stale result is popped, `_batch_active` is True
+        again (run 2 is running), so a kind-only check would misattribute it
+        as run 2's own progress, inflating `_batch_index`/`_batch_scored` for
+        an image run 2 never actually processed. A generation tag on each
+        batch dispatch, compared against the CURRENT `_batch_generation` at
+        pop time, is what tells the two runs apart.
+        """
+        executor, jobs = _deferred_executor()
+        self.win.inference_service.set_executor(executor)
+
+        # Run 1: starts over the folder; a.png's request is dispatched but
+        # NOT delivered.
+        self.win.assist.score_folder()
+        self.assertEqual(1, len(jobs))
+        run1_stale_job = jobs.pop(0)  # deliberately not invoked yet
+        self.win.assist.cancel_batch_scoring()
+        self.assertFalse(self.win.assist._batch_active)
+
+        # Run 2: starts fresh over the same folder; its OWN a.png request is
+        # in flight too.
+        self.win.assist.score_folder()
+        self.assertEqual(1, len(jobs))
+        self.assertTrue(self.win.assist._batch_active)
+        self.assertEqual(0, self.win.assist._batch_scored)
+        self.assertEqual(self.path('a.png'), self.win.assist._batch_current_path)
+
+        # NOW deliver run 1's stale result -- BEFORE run 2's own a.png
+        # request has been drained.
+        run1_stale_job()
+
+        # The stale result must be DROPPED, not counted as run 2's progress.
+        self.assertEqual(
+            0, self.win.assist._batch_scored,
+            "run 1's stale result was wrongly counted as run 2's progress")
+        self.assertEqual(
+            self.path('a.png'), self.win.assist._batch_current_path,
+            "run 1's stale result advanced run 2's batch index")
+        self.assertTrue(self.win.assist._batch_active)
+        self.assertEqual(1, len(jobs), 'run 2 must not have dispatched a second '
+                         'request out of turn')
+
+        # Drain run 2 to completion with its own (correct) results.
+        while jobs:
+            jobs.pop(0)()
+
+        self.assertFalse(self.win.assist._batch_active)
+        self.assertEqual(4, self.win.assist._batch_scored,
+                         'run 2 must score exactly its own 4 images, not '
+                         'more (inflated by the stale result) or fewer '
+                         '(an image dropped because the index ran ahead)')
+        for stem, _width in self.FILES:
+            self.assertIn(self.path(stem + '.png'), self.win.assist._uncertainty,
+                          '%s.png never got a real recorded score' % stem)
+        self.assertEqual([], self.errors)
+
+    def test_stale_result_from_a_run_cancelled_by_a_folder_switch_does_not_pollute_the_new_folder(self):
+        """Folder-switch variant of the race above: on_directory_scanned (not
+        a manual cancel_batch_scoring call) is what tears down run 1 when the
+        user switches directories mid-scan -- it cancels the batch AND resets
+        _uncertainty for the new folder. Run 1's stale result carries an
+        OLD-folder path; before the generation fix that path could still get
+        written into the NEW folder's _uncertainty map.
+        """
+        executor, jobs = _deferred_executor()
+        self.win.inference_service.set_executor(executor)
+        old_path_a = self.path('a.png')
+
+        # Run 1 over the original folder; a.png's request in flight.
+        self.win.assist.score_folder()
+        self.assertEqual(1, len(jobs))
+        run1_stale_job = jobs.pop(0)
+
+        # Switch to a new directory, as MainWindow.import_dir_images would
+        # (m_img_list already replaced, then on_directory_scanned called).
+        new_dir = os.path.join(self.tmp.name, 'photos2')
+        os.makedirs(new_dir)
+        new_paths = []
+        for stem, width in self.FILES:
+            img = QImage(width, width, QImage.Format_RGB32)
+            img.fill(0xffffffff)
+            p = os.path.join(new_dir, stem + '.png')
+            img.save(p)
+            new_paths.append(p)
+        self.win.m_img_list = new_paths
+        self.win.assist.on_directory_scanned()
+
+        self.assertFalse(self.win.assist._batch_active)
+        self.assertEqual({}, self.win.assist._uncertainty)
+
+        # Run 2 starts over the NEW folder.
+        self.win.assist.score_folder()
+        self.assertEqual(1, len(jobs))
+        self.assertTrue(self.win.assist._batch_active)
+
+        # NOW deliver run 1's stale (old-folder) result.
+        run1_stale_job()
+
+        self.assertNotIn(old_path_a, self.win.assist._uncertainty,
+                         'old-folder path leaked into the new uncertainty map')
+        self.assertEqual(0, self.win.assist._batch_scored)
+
+        while jobs:
+            jobs.pop(0)()
+
+        self.assertFalse(self.win.assist._batch_active)
+        self.assertEqual(4, self.win.assist._batch_scored)
+        for p in new_paths:
+            self.assertIn(p, self.win.assist._uncertainty)
+        self.assertNotIn(old_path_a, self.win.assist._uncertainty)
+        self.assertEqual([], self.errors)
+
 
 class TestNoBackendActiveLearning(unittest.TestCase):
     """Mirrors tests/test_assist.py's TestNoBackend: build_backend() returning
