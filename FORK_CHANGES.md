@@ -1,15 +1,15 @@
 # Fork changes vs upstream
 
 - **Upstream**: [HumanSignal/labelImg](https://github.com/HumanSignal/labelImg) @ `b33f965` — archived February 2024 (read-only), so these changes cannot be merged back.
-- **This fork**: [youngunghan/labelImg](https://github.com/youngunghan/labelImg) — maintained independently. Latest snapshot: [`v1.8.6-fork.1`](https://github.com/youngunghan/labelImg/releases/tag/v1.8.6-fork.1).
+- **This fork**: [youngunghan/labelImg](https://github.com/youngunghan/labelImg) — maintained independently. Latest snapshot: [`v1.8.6-fork.3`](https://github.com/youngunghan/labelImg/releases/tag/v1.8.6-fork.3) — the first release to include the AI-assist work (Phase 1–4 + COCO).
 
 ## At a glance
 
 | Metric | Value |
 |---|---|
-| Diff vs upstream | 57 files, **+8,785 / −94** |
-| Core app (`labelImg.py`) | +693 / −28 |
-| New documentation | `docs/` tree: 21 files, ~2,038 lines (Diátaxis: tutorials / how-to / reference / explanation) |
+| Diff vs upstream | 63 files, **+12,641 / −114** |
+| Core app (`labelImg.py`) | +754 / −34 |
+| New documentation | `docs/` tree: 21 files, ~2,050 lines (Diátaxis: tutorials / how-to / reference / explanation) |
 | Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
 | Tests | **280/280 passing**, 14 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
 | Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
