@@ -10,8 +10,8 @@
 | Diff vs upstream | 63 files, **+12,641 / −114** |
 | Core app (`labelImg.py`) | +754 / −34 |
 | New documentation | `docs/` tree: 21 files, ~2,050 lines (Diátaxis: tutorials / how-to / reference / explanation) |
-| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`, surgically bundles onnxruntime + numpy into the exe when `[ai]` is installed at build time — no model weights, still no in-app picker); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
-| Tests | **280/280 passing**, 14 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
+| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`, surgically bundles onnxruntime + numpy into the exe when `[ai]` is installed at build time — no model weights, but the in-app **Model Settings...** dialog picks the `.onnx` path); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
+| Tests | **299/299 passing**, 15 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
 | Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
 | CI | GitHub Actions: 3 jobs — core test matrix (Linux/Windows × Py3.9/3.12, headless Qt, base install only), `test-ai` (base + `[ai]` extra, exercises the ONNX-dependent tests), ruff critical-rules lint |
 
@@ -161,11 +161,11 @@ process is actually worth catching:
 | 2 | Two images sharing a basename in different subfolders (`train/0001.jpg`, `val/0001.jpg`) silently cross-contaminate each other's boxes in the shared COCO dataset json | `images[]` entries were keyed on bare basename; labelImg scans directories recursively, so both images collapsed onto one dataset entry and their annotations were unioned on read | images are keyed on the path relative to the dataset json (`dataset_relative_name`), with a guarded one-candidate-only migration for datasets written by other tools | `libs/coco_io.py`, `a32acd3` |
 | 3 | Every detected box lands ~0.6–0.8px off in the original image on any image whose letterbox padding is an odd number of pixels | the forward preprocessing rounded the pad to a whole pixel for the actual array paste, while the inverse mapping subtracted the unrounded float pad — a half-model-pixel bias that a self-consistency round-trip test couldn't catch (it only checked the inverse against itself, never against the numpy paste) | forward paste and inverse mapping now derive from one `_letterbox_geometry()` call, so they cannot disagree; new tests read the paste offset off the actual tensor | `libs/inference/yolo_onnx.py`, `c2ecf8e` |
 | 4 | `DEFAULT_BACKEND` was fixed from `'stub'` to `None` (fresh installs no longer light up the AI menu with `StubBackend`'s fabricated, image-dimension-derived boxes) — but anyone who had run an earlier build of this branch and closed it even once now has `'stub'` sitting explicitly in `~/.labelImgSettings.pkl`, because `closeEvent` wrote `self.assist.backend_name` unconditionally on every close. `AssistController.__init__` read that persisted value back and rebuilt `StubBackend`, completely bypassing the `DEFAULT_BACKEND=None` fix for exactly the users it was meant to protect | (a) the fix addressed the default, not the settings file it had already written; (b) `closeEvent` never distinguished "nothing configured" from "the constructor's own fallback value" when persisting | two-part fix: `AssistController.__init__` now treats a persisted `'stub'` as unset at read time, permanently (`_LEGACY_IMPLICIT_DEFAULT_BACKEND`, robust across repeated save/load cycles since it re-checks on every construction); `closeEvent` now only writes `SETTING_MODEL_BACKEND` when a backend was actually configured, and drops a stale key instead of leaving it, so this class of bug cannot recur | `libs/assist/controller.py`, `labelImg.py` |
-| 5 | Scoring a folder while a slow (Ctrl+I) interactive request for the same, currently-open image was still outstanding could swap the two results: the interactive prediction got consumed as the batch's own progress, and the batch's real result for that image leaked into the interactive suggestion flow instead | routing a result to "interactive" vs. "batch" by comparing its image path against `_batch_current_path` breaks the instant both flows target the same path at once — `InferenceService`'s single-worker pool queues rather than rejects the second request | every `predict_async` dispatch is now tagged 'interactive'/'batch' in a FIFO queue at submit time (`_dispatch_request`/`_pop_request_kind`), so results are attributed by **submission order**, not by path | `libs/assist/controller.py:504-555` |
-| 6 | A folder of many consecutive unreadable/vanished images could crash the whole app with `RecursionError` during Score Folder | the load-failure branch of `_batch_step` recorded the score and called the next `_batch_step()` **inline**, in the same stack frame — unlike the async predict path (always a fresh Qt signal frame), a long run of back-to-back failures chained unboundedly on the call stack | the next step is deferred via `QTimer.singleShot(0, ...)` (`_advance_batch(..., synchronous=False)`), posting it as a new event-loop iteration instead of a nested call | `libs/assist/controller.py:868-942`, regression test `TestBatchLoadFailureDoesNotRecurse` |
-| 7 | If every remaining image in the folder got classified away *while* a batch scan was still running, Score Folder — the only control that can cancel a running batch — could grey itself out, leaving the run uncancellable | the action's enabled state was gated on `has_folder` alone; `m_img_list` emptying mid-batch made that `False` even though the batch (walking its own frozen snapshot) was still active | gate widened to `available and (has_folder or batch_running)` | `libs/assist/controller.py:413`, regression test `TestScoreFolderStaysEnabledWhenFolderEmptiesMidBatch` |
-| 8 | After a genuine Open Directory, the newly-opened image's row in the file list was not highlighted | `import_dir_images` clears `file_list_widget` before loading the first image, so `load_file`'s own highlight attempt ran against an still-empty widget; nothing re-selected the row once `refresh_file_list` repopulated it afterwards | `refresh_file_list` re-selects the current image's row itself, after repopulating | `libs/assist/controller.py:1203-1208`, regression test `TestFileListSelectionAfterOpenDirectory` |
-| 9 | The displayed uncertainty rank / "scored N" total kept counting an image after it left the folder (classified out, deleted) | `_ranks()` counted every entry in `_uncertainty`, which deliberately keeps an out-of-folder image's score around so undo can restore it | `_ranks()`/the displayed total now count only the intersection of `_uncertainty` and the current `m_img_list` (the score itself is still retained, not deleted, for undo) | `libs/assist/controller.py:1242-1269`, regression tests `TestRankAndTotalExcludeAbsentImages` |
+| 5 | Scoring a folder while a slow (Ctrl+I) interactive request for the same, currently-open image was still outstanding could swap the two results: the interactive prediction got consumed as the batch's own progress, and the batch's real result for that image leaked into the interactive suggestion flow instead | routing a result to "interactive" vs. "batch" by comparing its image path against `_batch_current_path` breaks the instant both flows target the same path at once — `InferenceService`'s single-worker pool queues rather than rejects the second request | every `predict_async` dispatch is now tagged 'interactive'/'batch' in a FIFO queue at submit time (`_dispatch_request`/`_pop_request_kind`), so results are attributed by **submission order**, not by path | `libs/assist/controller.py:689-740` |
+| 6 | A folder of many consecutive unreadable/vanished images could crash the whole app with `RecursionError` during Score Folder | the load-failure branch of `_batch_step` recorded the score and called the next `_batch_step()` **inline**, in the same stack frame — unlike the async predict path (always a fresh Qt signal frame), a long run of back-to-back failures chained unboundedly on the call stack | the next step is deferred via `QTimer.singleShot(0, ...)` (`_advance_batch(..., synchronous=False)`), posting it as a new event-loop iteration instead of a nested call | `libs/assist/controller.py:1053-1127`, regression test `TestBatchLoadFailureDoesNotRecurse` |
+| 7 | If every remaining image in the folder got classified away *while* a batch scan was still running, Score Folder — the only control that can cancel a running batch — could grey itself out, leaving the run uncancellable | the action's enabled state was gated on `has_folder` alone; `m_img_list` emptying mid-batch made that `False` even though the batch (walking its own frozen snapshot) was still active | gate widened to `available and (has_folder or batch_running)` | `libs/assist/controller.py:598`, regression test `TestScoreFolderStaysEnabledWhenFolderEmptiesMidBatch` |
+| 8 | After a genuine Open Directory, the newly-opened image's row in the file list was not highlighted | `import_dir_images` clears `file_list_widget` before loading the first image, so `load_file`'s own highlight attempt ran against an still-empty widget; nothing re-selected the row once `refresh_file_list` repopulated it afterwards | `refresh_file_list` re-selects the current image's row itself, after repopulating | `libs/assist/controller.py:1388-1393`, regression test `TestFileListSelectionAfterOpenDirectory` |
+| 9 | The displayed uncertainty rank / "scored N" total kept counting an image after it left the folder (classified out, deleted) | `_ranks()` counted every entry in `_uncertainty`, which deliberately keeps an out-of-folder image's score around so undo can restore it | `_ranks()`/the displayed total now count only the intersection of `_uncertainty` and the current `m_img_list` (the score itself is still retained, not deleted, for undo) | `libs/assist/controller.py:1427-1454`, regression tests `TestRankAndTotalExcludeAbsentImages` |
 
 Two more come from the same review passes and are handled the same way (`load_labels`
 appending instead of clearing on `Import COCO...`, and the `setup.py` support floor
@@ -246,7 +246,8 @@ Effort: **S** small / **M** medium / **L** large.
     hit `MissingDependency` inside the frozen app and the AI menu stayed permanently grey no
     matter what the user configured -- see `docs/how-to/install-and-build.md`'s "onnxruntime
     번들" section. The exe still ships **no model weights** (AGPL, see
-    `data/models/README.md`) and there is still no in-app model-path picker. Remaining:
+    `data/models/README.md`) -- the model path is now set via the in-app **Model Settings...**
+    dialog (item 26) rather than by hand-editing the settings pickle. Remaining:
     `pyproject.toml` packaging under a distinct distribution name.
 17. **[M] Remove Python 2 / PyQt4 remnants** — dead import fallbacks in 15 files, no-op
     `ustr()` wrappers, `qt4py2` build paths; unblocks ruff/type-checking.
@@ -269,13 +270,13 @@ Effort: **S** small / **M** medium / **L** large.
 22. ~~**[M] Auto-label Folder**~~ — **done (2026-07-15, Phase 4)**: `AssistController.score_folder`
     batch-runs the model across every image in `m_img_list`, one at a time (so a large
     folder never blocks the UI thread), and is cancellable mid-run by triggering the
-    same action again (`libs/assist/controller.py:792-866`).
+    same action again (`libs/assist/controller.py:977-1051`).
 23. ~~**[S/M] Active learning (uncertainty-sorted review queue)**~~ — **done (2026-07-15,
     Phase 4)**: `sort_by_uncertainty` (`Ctrl+Shift+U`) reorders `m_img_list` by
     `least_confidence`, most-uncertain-first, so the existing `g`/`b` triage walks the
-    reordered stream (`libs/assist/controller.py:994-1017`); `Restore Filesystem Order`
+    reordered stream (`libs/assist/controller.py:1179-1202`); `Restore Filesystem Order`
     undoes it. File-list rows show a live rank/score suffix and heat-map tint
-    (`refresh_file_list`, `:1161-1208`).
+    (`refresh_file_list`, `:1346-1393`).
 24. **[L] Polygon / keypoint annotation modes** — `Shape.shape_type` exists as a label
     but the rectangle assumption is still load-bearing throughout `Canvas`
     (4-point vertex arithmetic, bbox-reducing writers); this is the most expensive
@@ -283,3 +284,15 @@ Effort: **S** small / **M** medium / **L** large.
 25. **[L] MobileSAM prompt-based segmentation** — `ModelBackend.segment()`/`embed()` are
     already declared on the ABC and `InferenceService` already has a per-image embedding
     cache slot; no segmentation backend implements them yet.
+26. **[S] In-app AI Model Settings dialog** — **done**: **AI menu > Model Settings...**
+    (`ModelSettingsDialog`, `libs/assist/settings_dialog.py`) lets a user pick a backend
+    (`사용 안 함` / `YOLO (ONNX)` -- `stub` deliberately not offered, it is a test double
+    that a persisted value of it is unconditionally treated as unset, see
+    `_LEGACY_IMPLICIT_DEFAULT_BACKEND`) and a `.onnx` path (typed or via
+    `QFileDialog.getOpenFileName`, `*.onnx`-filtered `Browse...`). OK validates, persists
+    both settings keys immediately (`settings.save()`, not deferred to `closeEvent`), and
+    rebuilds the backend live via `AssistController.apply_model_settings` -- the AI actions
+    enable with no restart. Distinguishes "onnxruntime not installed in this build" from
+    "bad/missing/corrupt model path" with different messages. Closes the gap the exe
+    packaging work (item 16) left open: released binaries had a working ONNX runtime but no
+    way to point it at a model file short of hand-editing the settings pickle.

@@ -32,8 +32,17 @@ alternatives below.
 ## Using your own model
 
 1. Put an ONNX detector anywhere on disk (this directory is a reasonable spot).
-2. Set the model path in labelImg's settings (`model/path`) and the backend to
-   `yolo_onnx` (`model/backend`).
+2. In the app: **AI menu > Model Settings...**, pick **YOLO (ONNX)**, and either
+   type the path or use **Browse...** to pick the `.onnx` file. Applying it
+   validates the file, rebuilds the backend live (no restart), and persists the
+   choice immediately (`AssistController.apply_model_settings`,
+   `libs/assist/controller.py`). "사용 안 함" ("no backend") turns AI back off.
+   `stub` -- the deterministic fake detector the test suite runs on -- is
+   deliberately not offered here; it exists to drive tests, not to annotate
+   real images. Equivalently, without opening the app, you can still set the
+   same two keys by hand in labelImg's settings (`model/path` /
+   `model/backend`) -- see [`docs/how-to/auto-label.md`](../../docs/how-to/auto-label.md)
+   for that path.
 3. Class names are resolved for you, in this order:
    1. the `names` entry in the ONNX file's own metadata (Ultralytics exports
       write one),
@@ -51,9 +60,8 @@ If you are instead running the prebuilt Windows exe from a GitHub Release,
 [`docs/how-to/install-and-build.md`](../../docs/how-to/install-and-build.md#onnxruntime-onnx-런타임-번들)),
 so you do **not** need `pip install -e ".[ai]"` for that exe -- the runtime is
 already inside it. The exe still ships **no model weights**, though: the AI
-menu stays greyed out until you point `model/path` at your own `.onnx` file
-(see "Using your own model" above); there is still no in-app file picker for
-this.
+menu stays greyed out until you point it at your own `.onnx` file via
+**AI menu > Model Settings...** (see "Using your own model" above).
 
 ### Exporting from Ultralytics (AGPL-3.0 -- applies to you)
 

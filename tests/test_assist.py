@@ -383,7 +383,13 @@ class TestNoBackend(AssistTestCase):
         # An image IS loaded, so toggle_actions has already run and enabled every
         # onLoadActive action — the controller has to win that argument.
         self.assertTrue(self.win.file_path)
-        for action in self.win.assist_actions:
+        # action_model_settings is deliberately EXEMPT from this loop: it is the
+        # action a fresh install needs in order to turn AI on in the first
+        # place, so refresh_actions never gates it on is_available() the way it
+        # gates every other AI action — see AssistController.create_actions.
+        self.assertIs(self.win.assist.action_model_settings, self.win.assist_actions[0])
+        self.assertTrue(self.win.assist.action_model_settings.isEnabled())
+        for action in self.win.assist_actions[1:]:
             self.assertFalse(action.isEnabled(), action.text())
             tooltip = action.toolTip()
             self.assertIn('pip install -e ".[ai]"', tooltip)
@@ -445,7 +451,11 @@ class TestBackendConfiguredButUnavailable(AssistTestCase):
     def test_hint_names_the_configured_backend_not_a_missing_config(self):
         self.assertEqual('yolo_onnx', self.win.assist.backend_name)
         self.assertFalse(self.win.assist.is_available())
+        # action_model_settings stays enabled regardless -- see the identical
+        # exemption comment in TestNoBackend.test_ai_actions_are_disabled_with_a_hint.
         for action in self.win.assist_actions:
+            if action is self.win.assist.action_model_settings:
+                continue
             self.assertFalse(action.isEnabled(), action.text())
             tooltip = action.toolTip()
             self.assertIn('pip install -e ".[ai]"', tooltip)
@@ -516,6 +526,8 @@ class TestLegacyPersistedStubIsTreatedAsUnset(unittest.TestCase):
         # -- a treated-as-unset backend must read exactly like nothing was
         # ever configured, not like a real backend that failed to build.
         for action in self.win.assist_actions:
+            if action is self.win.assist.action_model_settings:
+                continue
             self.assertFalse(action.isEnabled(), action.text())
             tooltip = action.toolTip()
             self.assertIn('No model backend configured', tooltip)
@@ -734,6 +746,8 @@ class TestToolTipRestoredWhenBackendBecomesAvailable(AssistTestCase):
 
         self.assertFalse(self.win.assist.is_available())
         for action in self.win.assist_actions:
+            if action is self.win.assist.action_model_settings:
+                continue
             self.assertIn('No model backend configured', action.statusTip())
             self.assertIn('No model backend configured', action.toolTip())
 
@@ -782,6 +796,8 @@ class TestDefaultConstructionHasNoBackend(unittest.TestCase):
         self.assertFalse(self.win.assist.is_available())
         self.assertIsNone(self.win.inference_service.backend())
         for action in self.win.assist_actions:
+            if action is self.win.assist.action_model_settings:
+                continue
             self.assertFalse(action.isEnabled(), action.text())
 
 

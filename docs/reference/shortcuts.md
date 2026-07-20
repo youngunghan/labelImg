@@ -65,21 +65,21 @@
 
 ## AI (모델 보조 라벨링, `&AI` 메뉴)
 
-구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:369-440`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
+구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:554-625`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
 
 | 키 | 동작 |
 |---|---|
-| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:59, 281-284`) |
-| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:60, 285-288`) |
-| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:61, 289-292`) |
-| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:321-353, 445-477`) |
-| `Ctrl+Shift+U` | **Sort by Uncertainty** (Phase 4) — 폴더 전체 배치 채점 결과로 `m_img_list`를 불확실성 내림차순 재정렬(`SHORTCUT_SORT_BY_UNCERTAINTY`, `controller.py:71`; `sort_by_uncertainty`, `:994-1017`). 현재 열린 이미지는 그대로 선택 유지 |
-| (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:792-866`). 배치가 도는 동안은 `m_img_list`가 비어도 이 액션(취소 컨트롤)이 켜져 있다(`refresh_actions`의 `batch_running`, `:412-413`) |
-| (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:1030-1052`) |
+| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:60, 466-469`) |
+| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:61, 470-473`) |
+| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:62, 474-477`) |
+| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:506-538, 630-662`) |
+| `Ctrl+Shift+U` | **Sort by Uncertainty** (Phase 4) — 폴더 전체 배치 채점 결과로 `m_img_list`를 불확실성 내림차순 재정렬(`SHORTCUT_SORT_BY_UNCERTAINTY`, `controller.py:72`; `sort_by_uncertainty`, `:1179-1202`). 현재 열린 이미지는 그대로 선택 유지 |
+| (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:977-1051`). 배치가 도는 동안은 `m_img_list`가 비어도 이 액션(취소 컨트롤)이 켜져 있다(`refresh_actions`의 `batch_running`, `:597-598`) |
+| (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:1215-1237`) |
 
 > 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1054`) → [formats.md](formats.md) · [modules.md](modules.md).
 >
-> **Score/Sort/Restore Order에 단축키를 하나만 준 이유**: 이 포크는 이미 단축키 이중바인딩 버그를 한 번 겪었다(Single Class Mode가 Ctrl+Shift+S에서 옮겨진 이력, `controller.py:50-58` 주석 참조). `Ctrl+Shift+U`("Uncertainty")는 그 주석이 열거한 기존 바인딩 전부와 겹치지 않는 것을 확인하고 골랐다. Score Folder/Restore Order는 자주 쓰는 액션이 아니라 메뉴 전용으로 남겨, 사용자 정의 분류 카테고리(File > Edit Classify Categories)가 임의의 단일 키를 계속 자유롭게 쓸 수 있는 여지를 줄이지 않는다.
+> **Score/Sort/Restore Order에 단축키를 하나만 준 이유**: 이 포크는 이미 단축키 이중바인딩 버그를 한 번 겪었다(Single Class Mode가 Ctrl+Shift+S에서 옮겨진 이력, `controller.py:51-59` 주석 참조). `Ctrl+Shift+U`("Uncertainty")는 그 주석이 열거한 기존 바인딩 전부와 겹치지 않는 것을 확인하고 골랐다. Score Folder/Restore Order는 자주 쓰는 액션이 아니라 메뉴 전용으로 남겨, 사용자 정의 분류 카테고리(File > Edit Classify Categories)가 임의의 단일 키를 계속 자유롭게 쓸 수 있는 여지를 줄이지 않는다.
 
 ## ⚠️ 이미지 분류 (파일 이동 — 주의)
 

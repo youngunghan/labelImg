@@ -24,6 +24,7 @@ write into B's annotation file as ground truth.
 """
 
 import logging
+import os
 
 try:
     from PyQt5.QtCore import QObject, Qt, QTimer
@@ -107,6 +108,66 @@ BACKEND_UNAVAILABLE_HINT = (
 # 'stub', ...}) directly, as the tests do) -- only this settings-read path
 # treats the persisted name as unset.
 _LEGACY_IMPLICIT_DEFAULT_BACKEND = 'stub'
+
+
+class ModelSettingsError(Exception):
+    """Raised by AssistController.apply_model_settings; ``str(exc)`` is the
+    user-facing message.
+
+    Two different failure causes are deliberately kept apart (see
+    apply_model_settings): the backend's runtime not being installed in this
+    build at all, versus everything being installed but the CHOSEN
+    configuration (empty/missing/non-.onnx path, or a file that fails to
+    load) being wrong. A user with no onnxruntime needs a completely
+    different next step (``pip install -e ".[ai]"``) from one who has it but
+    pointed the dialog at the wrong file, so the two must not collapse into
+    one generic "something went wrong" message.
+    """
+
+
+# Backends the in-app Model Settings dialog is allowed to offer.
+# Deliberately excludes 'stub': see _LEGACY_IMPLICIT_DEFAULT_BACKEND above --
+# a persisted 'stub' is unconditionally read back as *unset* by this
+# controller's own __init__, so letting a user explicitly pick it here would
+# create a setting that silently stops applying the moment the app is
+# restarted. 'stub' remains fully usable PROGRAMMATICALLY (tests, this
+# module's own set_backend) -- it is just never offered as a UI choice.
+AVAILABLE_UI_BACKENDS = ('yolo_onnx',)
+
+# Optional-dependency modules each UI-selectable backend needs to actually
+# construct, checked BEFORE attempting to build the backend (see
+# apply_model_settings) so "the extras are not installed" can be reported as
+# its own, distinct cause rather than folded into "bad model path".
+_BACKEND_REQUIRED_MODULES = {
+    'yolo_onnx': ('numpy', 'onnxruntime'),
+}
+
+RUNTIME_MISSING_HINT = (
+    "This backend needs %s, which %s not installed in this build. Install "
+    "the extras from your checkout with pip install -e \".[ai]\" (this fork "
+    "isn't on PyPI) -- or use a released build/exe, which already bundles "
+    "it.")
+
+
+def _importable(module_name):
+    """Whether ``module_name`` can be imported right now, without keeping it
+    imported for longer than the check needs (a plain ``__import__`` leaves
+    it in ``sys.modules``, same as any other import -- there is nothing to
+    undo, this just doesn't add any new state beyond that).
+
+    Deliberately the same probe ``libs/inference/yolo_onnx.py``'s ``_require``
+    and the test suite's own ``_importable`` helpers use (``mock.patch.dict``
+    on ``sys.modules`` with the module name set to ``None`` is what makes
+    this raise ``ImportError``, exactly like a genuinely absent package
+    would) -- so a test can simulate "no onnxruntime in this install" the
+    same way whether it is exercising the backend directly or this dialog
+    logic.
+    """
+    try:
+        __import__(module_name)
+    except ImportError:
+        return False
+    return True
 
 
 class AssistController(QObject):
@@ -249,9 +310,119 @@ class AssistController(QObject):
         })
 
     def set_backend(self, backend):
-        """Inject a backend directly (tests, and the future model picker)."""
+        """Inject a backend directly (tests, and the Model Settings dialog)."""
         self.service.set_backend(backend)
         self.refresh_actions()
+
+    def apply_model_settings(self, backend_name, model_path):
+        """Validate, persist and apply one Model Settings choice.
+
+        This is the WHOLE logic behind the dialog's OK button -- the
+        QDialog (``libs/assist/settings_dialog.py``) is a thin shell that
+        only collects ``backend_name``/``model_path`` and calls this; it
+        never validates or persists anything itself, and it never has to be
+        ``exec()``'d for this logic to be exercised (see the tests).
+
+        ``backend_name``: ``None``/``''`` means "no backend" (turn AI off);
+        otherwise it must be one of ``AVAILABLE_UI_BACKENDS`` -- 'stub' is
+        refused here too, defensively, even though the dialog never offers
+        it (see AVAILABLE_UI_BACKENDS's docstring).
+        ``model_path``: required (non-empty, existing, ``*.onnx``) when
+        ``backend_name`` names a real backend; ignored when turning AI off.
+
+        On success the two settings keys are written AND ``settings.save()``
+        is called IMMEDIATELY -- not left for ``MainWindow.closeEvent`` to
+        pick up later (see that method's persistence comment) -- so the
+        choice survives a crash and does not depend on the app being closed
+        normally. The backend is then rebuilt live via ``set_backend``
+        (which also calls ``refresh_actions()``), so the AI actions reflect
+        the new choice with no restart, and a status message reports
+        success.
+
+        Raises ``ModelSettingsError`` -- and leaves every setting/attribute
+        untouched -- on any validation or construction failure; never lets
+        any other exception escape, and never itself calls
+        ``self.app.error_message`` (the dialog decides how to surface the
+        message, so this stays callable from a test with no QMessageBox in
+        the loop).
+        """
+        settings = self.app.settings
+        backend_name = (backend_name or '').strip() or None
+
+        if backend_name is None:
+            self.backend_name = None
+            self.model_path = None
+            # Mirrors closeEvent's own "only persist a REAL choice" guard
+            # (labelImg.py) -- dropping the key rather than writing a falsy
+            # one keeps a fresh pickle and an explicitly-disabled one
+            # indistinguishable, which is what AssistController.__init__
+            # already assumes when it defaults an absent key to
+            # DEFAULT_BACKEND (None).
+            settings.data.pop(SETTING_MODEL_BACKEND, None)
+            settings.save()
+            self.set_backend(None)
+            self.app.status('AI model disabled.')
+            return
+
+        if backend_name not in AVAILABLE_UI_BACKENDS:
+            raise ModelSettingsError('Unknown or unsupported backend: %r' % (backend_name,))
+
+        model_path = (model_path or '').strip()
+        if not model_path:
+            raise ModelSettingsError('Choose a model file (.onnx) before applying.')
+        if not model_path.lower().endswith('.onnx'):
+            raise ModelSettingsError('Not an .onnx file: %s' % model_path)
+        if not os.path.isfile(model_path):
+            raise ModelSettingsError('Model file not found: %s' % model_path)
+
+        # Checked BEFORE attempting construction, and BEFORE any settings are
+        # touched: this is what lets "the extras are not installed" surface
+        # as its own message distinct from every other failure below (see
+        # ModelSettingsError's docstring) regardless of what build_backend
+        # itself would have logged.
+        missing = [name for name in _BACKEND_REQUIRED_MODULES.get(backend_name, ())
+                  if not _importable(name)]
+        if missing:
+            plural = len(missing) > 1
+            raise ModelSettingsError(RUNTIME_MISSING_HINT % (
+                ' and '.join(missing), 'are' if plural else 'is'))
+
+        # conf_threshold=0.0: same contract as _build_backend -- the slider
+        # re-filters what is already on screen, so the backend itself must
+        # not pre-filter.
+        backend = build_backend({
+            'backend': backend_name,
+            'model_path': model_path,
+            'conf_threshold': 0.0,
+        })
+        if backend is None:
+            raise ModelSettingsError(
+                'Could not load this model -- the file may be corrupt, not a '
+                'YOLOv5/v8 ONNX export, or otherwise unsupported. Check the '
+                'log for details.')
+
+        self.backend_name = backend_name
+        self.model_path = model_path
+        settings[SETTING_MODEL_BACKEND] = backend_name
+        settings[SETTING_MODEL_PATH] = model_path
+        settings.save()
+        self.set_backend(backend)
+        self.app.status('AI model applied: %s (%s)' % (backend_name, model_path))
+
+    def open_model_settings_dialog(self, _value=False):
+        """AI menu > Model Settings... . The ONLY place that ever calls
+        ``exec_()`` on ``ModelSettingsDialog`` -- every behaviour the dialog
+        triggers (validate, persist, rebuild) lives in
+        ``apply_model_settings`` above, which is what the tests drive
+        directly instead of reaching this method (see that method's
+        docstring). Imported lazily so importing this module never drags in
+        the dialog module for no reason (mirrors the lazy imports the
+        backends themselves use for their optional deps).
+        """
+        from libs.assist.settings_dialog import ModelSettingsDialog
+
+        dialog = ModelSettingsDialog(self, parent=self.app)
+        dialog.exec_()
 
     def is_available(self):
         return self.service.is_available()
@@ -278,6 +449,17 @@ class AssistController(QObject):
         image-dependent ones, see load_active_actions) into ``onLoadActive``.
         """
         app = self.app
+        # Always enabled -- this is the action a fresh install with nothing
+        # configured needs in order to turn AI on in the first place, so it
+        # must NOT be gated on is_available() the way every action below it
+        # is, and it is deliberately kept OUT of self._actions (set below) so
+        # refresh_actions' unavailable-hint loop never stamps it with the
+        # "AI disabled" tooltip either.
+        self.action_model_settings = new_action(
+            app, 'Model Settings...', self.open_model_settings_dialog, None, 'edit',
+            'Choose the AI backend and .onnx model file, and apply it live '
+            '(no restart needed)', enabled=True)
+
         self.action_auto = new_action(
             app, 'Auto-label Image', self.auto_label_image, SHORTCUT_AUTO_LABEL, 'new',
             'Run the model on this image and show its boxes as suggestions',
@@ -316,7 +498,10 @@ class AssistController(QObject):
         # has the real base tip to restore once a backend becomes available.
         self._base_tips = {action: action.statusTip() for action in self._actions}
         self.refresh_actions()
-        return list(self._actions)
+        # action_model_settings goes first in the menu and is NOT part of
+        # self._actions (see its construction above) -- it stays enabled and
+        # keeps its own tooltip regardless of backend availability.
+        return [self.action_model_settings] + list(self._actions)
 
     def _create_threshold_action(self):
         """A slider embedded in the menu (QWidgetAction), like the zoom widget.
