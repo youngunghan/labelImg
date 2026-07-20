@@ -101,13 +101,19 @@ class ModelSettingsDialog(QDialog):
     # -- slots -----------------------------------------------------------
 
     def _browse(self):
-        path, _filter = QFileDialog.getOpenFileName(
+        result = QFileDialog.getOpenFileName(
             self, 'Select ONNX model', self.path_edit.text(), 'ONNX Model (*.onnx)')
         # PyQt4's getOpenFileName returns a bare string rather than a
         # (name, filter) tuple; mirrors labelImg.py's own open_file handling
-        # of the same quirk.
-        if isinstance(path, (tuple, list)):  # pragma: no cover - defensive
-            path = path[0] if path else ''
+        # of the same quirk. The isinstance check MUST run before any tuple
+        # unpacking of `result` -- unpacking first (the previous shape of
+        # this code, `path, _filter = QFileDialog.getOpenFileName(...)`)
+        # raises trying to unpack a bare string under the PyQt4 fallback,
+        # before this guard ever gets a chance to run.
+        if isinstance(result, (tuple, list)):
+            path = result[0] if result else ''
+        else:  # pragma: no cover - defensive: PyQt4's bare-string return
+            path = result
         if path:
             self.path_edit.setText(path)
 

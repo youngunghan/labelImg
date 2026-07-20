@@ -65,17 +65,17 @@
 
 ## AI (모델 보조 라벨링, `&AI` 메뉴)
 
-구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:554-625`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
+구현: `libs/assist/controller.py`(`AssistController`). 이미지가 열려 있고 사용 가능한 모델 백엔드가 있을 때만 활성화된다(`refresh_actions`, `controller.py:599-679`) — 백엔드가 없으면(base install 등) 툴팁에 설치 안내가 뜬다.
 
 | 키 | 동작 |
 |---|---|
-| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:60, 466-469`) |
-| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:61, 470-473`) |
-| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:62, 474-477`) |
-| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:506-538, 630-662`) |
-| `Ctrl+Shift+U` | **Sort by Uncertainty** (Phase 4) — 폴더 전체 배치 채점 결과로 `m_img_list`를 불확실성 내림차순 재정렬(`SHORTCUT_SORT_BY_UNCERTAINTY`, `controller.py:72`; `sort_by_uncertainty`, `:1179-1202`). 현재 열린 이미지는 그대로 선택 유지 |
-| (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:977-1051`). 배치가 도는 동안은 `m_img_list`가 비어도 이 액션(취소 컨트롤)이 켜져 있다(`refresh_actions`의 `batch_running`, `:597-598`) |
-| (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:1215-1237`) |
+| `Ctrl+I` | **Auto-label Image** — 현재 이미지에 모델을 실행해 결과를 점선·반투명 박스(제안)로 표시(`SHORTCUT_AUTO_LABEL`, `controller.py:60, 508-511`) |
+| `Ctrl+Return` | **Accept All Suggestions** — 이 이미지의 모든 제안을 실제 박스로 확정(`SHORTCUT_ACCEPT_ALL`, `controller.py:61, 512-515`) |
+| `Ctrl+Backspace` | **Reject All Suggestions** — 이 이미지의 모든 제안을 폐기(`SHORTCUT_REJECT_ALL`, `controller.py:62, 516-519`) |
+| (메뉴 전용, 슬라이더) | **Confidence Threshold** — 이 값 미만의 제안은 화면에서 숨김(재추론 없이 필터만 재적용, `controller.py:551-583, 681-716`) |
+| `Ctrl+Shift+U` | **Sort by Uncertainty** (Phase 4) — 폴더 전체 배치 채점 결과로 `m_img_list`를 불확실성 내림차순 재정렬(`SHORTCUT_SORT_BY_UNCERTAINTY`, `controller.py:72`; `sort_by_uncertainty`, `:1267-1290`). 현재 열린 이미지는 그대로 선택 유지 |
+| (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:1065-1139`). 배치가 도는 동안은 `m_img_list`가 비거나 `available`이 `False`여도(예: 배치 도중 Model Settings에서 AI를 꺼도) 이 액션(취소 컨트롤)이 켜져 있다(`refresh_actions`의 `batch_running`, `:642-652` — 교차엔진 리뷰로 발견: 이전에는 `available`이 전체 식에 AND로 걸려 있어 배치 도중 AI를 끄면 취소 컨트롤 자체가 회색으로 죽었다) |
+| (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:1303-1325`) |
 
 > 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1054`) → [formats.md](formats.md) · [modules.md](modules.md).
 >

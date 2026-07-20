@@ -47,7 +47,10 @@ from libs.assist.controller import (AVAILABLE_UI_BACKENDS,
                                     RUNTIME_MISSING_HINT, ModelSettingsError)
 from libs.assist.settings_dialog import ModelSettingsDialog
 from libs.constants import SETTING_MODEL_BACKEND, SETTING_MODEL_PATH
+from libs.inference.backend import ModelBackend
+from libs.inference.service import SynchronousExecutor
 from libs.inference.stub import StubBackend
+from test_active_learning import _deferred_executor
 from test_yolo_onnx import build_onnx_model, v8_tensor
 
 IMAGE_SIZE = 64
@@ -63,6 +66,22 @@ def _importable(module_name):
 
 HAS_NUMPY = _importable('numpy')
 HAS_ONNXRUNTIME = _importable('onnxruntime')
+
+
+class _RaisingBackend(ModelBackend):
+    """predict() always raises -- used to force InferenceService's job()
+    closure down its predictionFailed path (rather than predictionReady's)
+    under a deferred executor, so a test can exercise
+    AssistController.on_prediction_failed's interactive generation guard
+    specifically."""
+
+    name = 'raising'
+    supports_detection = True
+    supports_segmentation = False
+
+    def predict(self, image):
+        raise RuntimeError('synthetic failure for the interactive '
+                           'generation-guard regression test')
 
 
 class ModelSettingsTestCase(unittest.TestCase):
@@ -206,6 +225,16 @@ class TestApplyNoBackend(ModelSettingsTestCase):
         self.assertNotIn(SETTING_MODEL_BACKEND, self.win.settings.data)
         # Persisted to DISK immediately -- not deferred to closeEvent.
         self.assertNotIn(SETTING_MODEL_BACKEND, self.persisted())
+
+    def test_none_also_removes_the_now_stale_persisted_model_path_key(self):
+        # SETTING_MODEL_PATH means nothing without SETTING_MODEL_BACKEND to
+        # pair it with (functionally inert), but leaving it behind is
+        # untidy and could confuse anything reading the pickle directly --
+        # both keys are dropped together.
+        self.win.assist.apply_model_settings(None, '')
+
+        self.assertNotIn(SETTING_MODEL_PATH, self.win.settings.data)
+        self.assertNotIn(SETTING_MODEL_PATH, self.persisted())
 
 
 class TestBadPath(ModelSettingsTestCase):
@@ -391,6 +420,289 @@ class TestDialogIsAThinShell(ModelSettingsTestCase):
             self.assertEqual('', dialog.path_edit.text())
         finally:
             dialog.deleteLater()
+
+
+class TestBrowseHandlesThePyQt4BareStringReturn(ModelSettingsTestCase):
+    """Cheap-but-confirmed fix: ModelSettingsDialog._browse's
+    isinstance(path, (tuple, list)) guard must run BEFORE any tuple
+    unpacking of QFileDialog.getOpenFileName's return value -- the previous
+    shape (``path, _filter = QFileDialog.getOpenFileName(...)``) unpacked
+    first, so the PyQt4 fallback (a bare string, not a (name, filter) tuple)
+    would raise trying to unpack that string before the guard ever ran.
+
+    QFileDialog.getOpenFileName is a MODAL file picker -- it is mocked here,
+    never actually invoked, so this stays dialog-safe under offscreen."""
+
+    def test_a_bare_string_return_does_not_raise_and_sets_the_path(self):
+        dialog = ModelSettingsDialog(self.win.assist, parent=self.win)
+        try:
+            with mock.patch('libs.assist.settings_dialog.QFileDialog.getOpenFileName',
+                            return_value='/picked/model.onnx'):
+                dialog._browse()  # must not raise
+            self.assertEqual('/picked/model.onnx', dialog.path_edit.text())
+        finally:
+            dialog.deleteLater()
+
+    def test_a_tuple_return_still_works(self):
+        dialog = ModelSettingsDialog(self.win.assist, parent=self.win)
+        try:
+            with mock.patch('libs.assist.settings_dialog.QFileDialog.getOpenFileName',
+                            return_value=('/picked/model.onnx', 'ONNX Model (*.onnx)')):
+                dialog._browse()
+            self.assertEqual('/picked/model.onnx', dialog.path_edit.text())
+        finally:
+            dialog.deleteLater()
+
+    def test_an_empty_bare_string_return_leaves_the_path_untouched(self):
+        # Cancelling the (mocked) dialog: PyQt4 returns '' rather than a
+        # (name, filter) tuple with an empty first element.
+        dialog = ModelSettingsDialog(self.win.assist, parent=self.win)
+        try:
+            dialog.path_edit.setText('/already/there.onnx')
+            with mock.patch('libs.assist.settings_dialog.QFileDialog.getOpenFileName',
+                            return_value=''):
+                dialog._browse()
+            self.assertEqual('/already/there.onnx', dialog.path_edit.text())
+        finally:
+            dialog.deleteLater()
+
+
+class TestBackendSwapClearsSuggestions(ModelSettingsTestCase):
+    """P1a [BLOCKING]: swapping the backend must not leave a previous
+    model's suggestions live on the canvas. AssistController.set_backend
+    used to only call service.set_backend()+refresh_actions() -- never
+    clear_suggestions() -- so model A's provisional boxes (and Accept/Reject
+    All, which read has_suggestions straight off the canvas) survived a
+    swap to model B: Accept All would then commit model A's boxes as if
+    they were model B's output. See AssistController.set_backend."""
+
+    def setUp(self):
+        super(TestBackendSwapClearsSuggestions, self).setUp()
+        self.win.inference_service.set_executor(SynchronousExecutor())
+        self.win.assist.set_backend(StubBackend())
+        self.win.assist.auto_label_image()
+        self.assertEqual(2, len(self.win.canvas.shapes))  # StubBackend: 2 detections
+        self.assertTrue(self.win.assist.action_accept.isEnabled())
+        self.assertTrue(self.win.assist.action_reject.isEnabled())
+
+    def test_swapping_backend_clears_stale_suggestions_from_the_canvas(self):
+        self.win.assist.set_backend(StubBackend())  # model B
+
+        self.assertEqual([], self.win.canvas.shapes)
+        self.assertEqual(0, self.win.label_list.count())
+        self.assertEqual([], self.win.assist._detections)
+
+    def test_swapping_backend_disables_accept_and_reject(self):
+        self.win.assist.set_backend(StubBackend())
+
+        self.assertFalse(self.win.assist.action_accept.isEnabled())
+        self.assertFalse(self.win.assist.action_reject.isEnabled())
+
+    def test_swapping_backend_drops_dismissed_tracking_too(self):
+        # Delete one suggestion by hand first (records it as dismissed) --
+        # that bookkeeping is keyed by DETECTION INDEX, which means nothing
+        # under a different model and must not survive the swap either, or
+        # a later threshold move under the new model could silently drop a
+        # box at an index that happened to collide with the old dismissal.
+        shape = self.win.canvas.shapes[0]
+        self.win.canvas.select_shape(shape)
+        self.win.delete_selected_shape()
+        self.win.canvas.de_select_shape()
+        self.assertEqual({0}, self.win.assist._dismissed)
+
+        self.win.assist.set_backend(StubBackend())
+
+        self.assertEqual(set(), self.win.assist._dismissed)
+
+    def test_accept_all_after_a_swap_has_nothing_stale_to_commit(self):
+        self.win.assist.set_backend(StubBackend())
+
+        accepted = self.win.assist.accept_all()
+
+        self.assertEqual(0, accepted, 'nothing from the OLD model should have '
+                         'been left for Accept All to commit')
+
+
+class TestInteractiveResultDroppedAfterBackendSwap(ModelSettingsTestCase):
+    """P1b [BLOCKING]: an INTERACTIVE (Ctrl+I) prediction dispatched under
+    one backend must be DROPPED if it only resolves after the backend has
+    since been swapped -- otherwise a slow model-A result would be silently
+    accepted as model B's. _is_current alone cannot catch this: the image
+    can easily still be the CURRENT one (the user did not navigate, they
+    just reopened Model Settings). Mirrors the generation-tag discipline
+    _batch_generation already applies to two batch runs -- see
+    AssistController._interactive_generation."""
+
+    def setUp(self):
+        super(TestInteractiveResultDroppedAfterBackendSwap, self).setUp()
+        self.executor, self.jobs = _deferred_executor()
+        self.win.inference_service.set_executor(self.executor)
+        self.win.assist.set_backend(StubBackend())
+
+    def test_late_interactive_result_from_the_old_backend_is_dropped(self):
+        self.win.assist.auto_label_image()
+        self.assertEqual(1, len(self.jobs))
+
+        # The backend swaps (exactly what apply_model_settings does) WHILE
+        # that request is still outstanding.
+        self.win.assist.set_backend(StubBackend())
+
+        # The stale job (model A's answer) finally resolves.
+        self.jobs.pop(0)()
+
+        self.assertEqual([], self.win.canvas.shapes,
+                         'a late result from a superseded backend generation '
+                         'must not inject boxes onto the canvas')
+        self.assertEqual([], self.win.assist._detections)
+        self.assertFalse(self.win.assist.action_accept.isEnabled())
+
+    def test_late_interactive_failure_from_the_old_backend_is_also_dropped(self):
+        # Same generation guard, exercised through on_prediction_failed
+        # instead of on_prediction_ready: model A's outstanding request
+        # resolves as a FAILURE (predict() raises) only after the swap, and
+        # must not be surfaced as if it were current.
+        self.win.assist.set_backend(_RaisingBackend())
+        self.win.assist.auto_label_image()
+        self.assertEqual(1, len(self.jobs))
+
+        self.win.assist.set_backend(StubBackend())  # swap away from model A
+
+        statuses = []
+        self.win.status = lambda message, delay=5000: statuses.append(message)
+
+        self.jobs.pop(0)()  # model A's job finally runs; backend.predict() raises
+
+        self.assertFalse(
+            any('Model failed' in message for message in statuses),
+            'a late FAILURE from a superseded backend generation must not be '
+            'surfaced as if it were current: %r' % (statuses,))
+        self.assertEqual([], self.errors)
+
+    def test_a_fresh_request_dispatched_after_the_swap_still_resolves_normally(self):
+        # The generation-tagging fix must not break the ordinary case: a
+        # request dispatched AFTER the swap (nothing older outstanding)
+        # still resolves.
+        self.win.assist.set_backend(StubBackend())  # model B
+        self.win.assist.auto_label_image()
+        self.assertEqual(1, len(self.jobs))
+
+        self.jobs.pop(0)()
+
+        self.assertEqual(2, len(self.win.canvas.shapes))
+        self.assertTrue(self.win.assist.action_accept.isEnabled())
+
+
+class TestCancelStaysReachableWhenDisabledMidBatch(ModelSettingsTestCase):
+    """P2 [BLOCKING], half (a): refresh_actions ANDed `available` over the
+    WHOLE Score Folder condition, so choosing "사용 안 함" (disabling AI)
+    while a batch is running made `available` False and disabled the ONLY
+    control that can cancel a running batch. See refresh_actions' own
+    comment: `batch_running` must be ORed over the whole expression, not
+    just the has_folder half."""
+
+    def setUp(self):
+        super(TestCancelStaysReachableWhenDisabledMidBatch, self).setUp()
+        self.executor, self.jobs = _deferred_executor()
+        self.win.inference_service.set_executor(self.executor)
+        self.win.assist.set_backend(StubBackend())
+
+        self.win.assist.score_folder()
+        self.assertTrue(self.win.assist._batch_active)
+        self.assertTrue(self.win.assist.action_score_folder.isEnabled())
+
+    def test_refresh_actions_gating_keeps_cancel_reachable_even_without_the_proactive_cancel(self):
+        # Isolates refresh_actions' OWN gating fix from
+        # apply_model_settings' separate "cancel proactively before
+        # dropping the backend" hardening (which would otherwise cancel the
+        # batch before this path is ever exercised -- a backend can become
+        # unavailable mid-batch by other means too, per that method's
+        # docstring, so the gating fix must hold on its own).
+        with mock.patch.object(self.win.assist, 'cancel_batch_scoring', return_value=False):
+            self.win.assist.apply_model_settings(None, '')
+
+        self.assertTrue(self.win.assist._batch_active,
+                        'batch should still be running -- cancel_batch_scoring was stubbed out')
+        self.assertTrue(
+            self.win.assist.action_score_folder.isEnabled(),
+            'the only control that can cancel a running batch must stay reachable '
+            'even after AI is disabled mid-scan')
+
+    def test_apply_model_settings_disable_proactively_cancels_an_active_batch(self):
+        # Half (a)'s "belt and braces" partner: apply_model_settings' own
+        # disable branch cancels an active batch BEFORE dropping the
+        # backend, so the batch never runs backend-less at all.
+        self.win.assist.apply_model_settings(None, '')
+
+        self.assertFalse(self.win.assist._batch_active)
+        self.assertEqual([], self.errors)
+
+
+class TestBackendLessBatchDoesNotRecurse(ModelSettingsTestCase):
+    """P2 [BLOCKING], half (b): InferenceService.predict_async's own
+    `self._backend is None` early return used to emit `predictionFailed`
+    SYNCHRONOUSLY, in-process (a direct call, not a queued cross-thread
+    signal) -- reaching on_prediction_failed -> _advance_batch(synchronous=
+    True) -> _batch_step() recursing in the SAME call stack for every
+    remaining image. Identical recursion class already fixed for
+    _batch_step's own unreadable-file branch (see
+    tests/test_active_learning.py's TestBatchLoadFailureDoesNotRecurse);
+    this new trigger (a backend that disappears mid-scan, e.g. via Model
+    Settings) never got that fix.
+
+    SAFETY: m_img_list is set directly here, never via load_file (per the
+    task's dialog-safety rule) -- and a single real, on-disk image is
+    reused for every position, so this stays fast and avoids creating 700
+    files on disk while still feeding a genuinely READABLE image into
+    _load_model_image (the point is exercising predict_async's
+    backend-None branch, not the already-fixed unreadable-file branch)."""
+
+    N = 700
+
+    def _drain_deferred_batch(self, max_iterations):
+        """Pump the Qt event loop until the batch finishes or
+        `max_iterations` is exhausted -- the deferred QTimer.singleShot(0, ...)
+        steps only fire when the event loop is actually pumped."""
+        for _ in range(max_iterations):
+            if not self.win.assist._batch_active:
+                return True
+            QApplication.processEvents()
+        return not self.win.assist._batch_active
+
+    def test_batch_completes_when_the_backend_disappears_mid_scan(self):
+        one_image = self.win.file_path
+        self.assertTrue(os.path.isfile(one_image))
+        paths = [one_image] * self.N
+        self.win.m_img_list = paths
+        self.win.img_count = len(paths)
+
+        executor, jobs = _deferred_executor()
+        self.win.inference_service.set_executor(executor)
+        self.win.assist.set_backend(StubBackend())
+
+        self.assertTrue(self.win.assist.score_folder())
+        self.assertEqual(1, len(jobs))
+
+        # The backend disappears mid-scan by SOME OTHER means than the
+        # dialog (bypassing AssistController.set_backend on purpose, so
+        # apply_model_settings' proactive cancel-batch hardening cannot
+        # mask the very recursion this test exists to catch -- see that
+        # method's "preferred additional hardening" note: a backend can
+        # become unavailable other ways too).
+        self.win.inference_service.set_backend(None)
+
+        jobs.pop(0)()  # resolves the one in-flight (model-A) request
+
+        finished = self._drain_deferred_batch(self.N * 3 + 200)
+        self.assertTrue(
+            finished,
+            'batch never completed -- a hang here means a broken deferral '
+            '(a RecursionError would instead raise out of this test as an '
+            'exception, not hang)')
+        self.assertFalse(self.win.assist._batch_active)
+        self.assertEqual(self.N, self.win.assist._batch_scored)
+        # HARD SAFETY: never a modal, regardless of how many consecutive
+        # images failed to score.
+        self.assertEqual([], self.errors)
 
 
 if __name__ == '__main__':

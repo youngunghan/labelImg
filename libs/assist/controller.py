@@ -261,6 +261,18 @@ class AssistController(QObject):
         # detectable -- see on_prediction_ready/on_prediction_failed.
         self._batch_generation = 0
 
+        # Bumped every time set_backend() actually swaps the model -- the
+        # INTERACTIVE-flow counterpart to _batch_generation above. Tags every
+        # interactive dispatch (_dispatch_request) so a request submitted
+        # under the OLD backend that resolves only after a swap is dropped
+        # instead of being injected as if it were the NEW backend's output:
+        # unlike a stale-image drop (_is_current), the image can easily still
+        # be the current one (the user did not navigate, they just reopened
+        # Model Settings), so path/image identity alone cannot tell an old
+        # backend's answer apart from the new one's -- only order can. See
+        # on_prediction_ready/on_prediction_failed and set_backend.
+        self._interactive_generation = 0
+
         # FIFO of (kind, generation) tags, one appended per predict_async
         # dispatch (_dispatch_request) and popped by on_prediction_ready /
         # on_prediction_failed (_pop_request_kind). InferenceService's single
@@ -310,9 +322,29 @@ class AssistController(QObject):
         })
 
     def set_backend(self, backend):
-        """Inject a backend directly (tests, and the Model Settings dialog)."""
+        """Inject a backend directly (tests, and the Model Settings dialog).
+
+        A model swap invalidates everything the PREVIOUS backend produced.
+        Two halves, both required:
+
+        * ``clear_suggestions()`` drops whatever is still on the canvas (and
+          the ``_dismissed`` tracking that goes with it) -- without this,
+          switching from model A to model B left model A's boxes on screen
+          with Accept/Reject All still enabled (``has_suggestions`` reads the
+          canvas directly), so Accept All would commit model A's boxes as if
+          they were model B's output.
+        * bumping ``_interactive_generation`` invalidates any INTERACTIVE
+          request still outstanding under the old backend: without it, a
+          slow model-A prediction that resolves after this swap would be
+          silently accepted as model B's, because the image it targets can
+          easily still be the CURRENT one (_is_current alone would not catch
+          it -- the user did not navigate, they just changed the model).
+          Mirrors the exact discipline ``_batch_generation`` already applies
+          to batch runs -- see _dispatch_request/on_prediction_ready.
+        """
         self.service.set_backend(backend)
-        self.refresh_actions()
+        self._interactive_generation += 1
+        self.clear_suggestions()  # also calls refresh_actions()
 
     def apply_model_settings(self, backend_name, model_path):
         """Validate, persist and apply one Model Settings choice.
@@ -359,7 +391,20 @@ class AssistController(QObject):
             # already assumes when it defaults an absent key to
             # DEFAULT_BACKEND (None).
             settings.data.pop(SETTING_MODEL_BACKEND, None)
+            # SETTING_MODEL_PATH is meaningless without a backend name to
+            # pair it with; leaving it behind is functionally inert (nothing
+            # reads it while SETTING_MODEL_BACKEND is absent) but stale, so
+            # it is dropped here too rather than left to rot in the pickle.
+            settings.data.pop(SETTING_MODEL_PATH, None)
             settings.save()
+            # A batch scan cannot run without a backend -- cancel one before
+            # dropping it (mirrors on_directory_scanned's own
+            # cancel-before-invalidate discipline) so the batch never runs
+            # backend-less at all. Belt: refresh_actions' own gating fix
+            # (see that method) is the braces -- cancellation must stay
+            # reachable even if a backend becomes unavailable some OTHER
+            # way this call site does not anticipate.
+            self.cancel_batch_scoring()
             self.set_backend(None)
             self.app.status('AI model disabled.')
             return
@@ -594,8 +639,17 @@ class AssistController(QObject):
         # active, leaving the user with no way to stop it. batch_running is
         # ORed in so cancellation stays reachable for the batch's whole
         # duration regardless of what happens to m_img_list.
+        #
+        # `batch_running` is ORed over the WHOLE expression, not just
+        # `has_folder` -- `available` must not gate it either. Availability
+        # can drop WHILE a batch is running (e.g. the user picks "사용 안 함"
+        # in Model Settings mid-scan, or a backend becomes unavailable some
+        # other way): ANDing `available` over the whole condition would grey
+        # out the ONLY control that can cancel a running batch at the exact
+        # moment it is needed most, stranding the user with a batch they can
+        # no longer stop.
         if self.action_score_folder is not None:
-            self.action_score_folder.setEnabled(available and (has_folder or batch_running))
+            self.action_score_folder.setEnabled((available and has_folder) or batch_running)
         if self.action_sort is not None:
             self.action_sort.setEnabled(available and bool(self._uncertainty) and not batch_running)
         if self.action_restore_order is not None:
@@ -684,7 +738,13 @@ class AssistController(QObject):
             return False
 
         self.app.status('Running the model on %s...' % file_path)
-        return self._dispatch_request('interactive', file_path, image)
+        # Tagged with the CURRENT interactive generation, exactly like
+        # _batch_step tags a batch dispatch with self._batch_generation --
+        # see _interactive_generation's own comment in __init__ and
+        # set_backend for why this is what lets a late result from a
+        # since-superseded backend be dropped.
+        return self._dispatch_request('interactive', file_path, image,
+                                      self._interactive_generation)
 
     def _dispatch_request(self, kind, path, image, generation=None):
         """Submit one predict_async request, tagged with which flow started
@@ -731,10 +791,17 @@ class AssistController(QObject):
         controller goes through _dispatch_request, which appends before
         submitting, so a result reaching on_prediction_ready/
         on_prediction_failed always has a matching tag queued ahead of it;
-        the empty-queue case is defensive only (never observed) and falls
-        back to ``('interactive', None)`` rather than raising, so a bug here
+        the empty-queue case is defensive only (never observed via the real
+        dispatch path -- tests that emit predictionReady/predictionFailed
+        directly, bypassing _dispatch_request, hit it on purpose) and falls
+        back to ``('interactive', None)`` rather than raising. ``None`` is
+        deliberately never a real ``_interactive_generation`` value (that
+        counter only ever holds ints -- see __init__), so
+        on_prediction_ready/on_prediction_failed treat it as "generation
+        unknown, judge this by _is_current alone" rather than as a mismatch
+        to drop: a bug here (or a test bypassing dispatch on purpose)
         degrades to the ordinary stale-result guard instead of crashing the
-        app.
+        app or silently dropping a result nothing tagged as stale.
         """
         if self._pending_requests:
             return self._pending_requests.pop(0)
@@ -750,6 +817,20 @@ class AssistController(QObject):
                 logger.info('Dropping late batch result for %r (batch already '
                             'finished/was cancelled, or superseded by a newer '
                             'run)', image_path)
+            return
+        if generation is not None and generation != self._interactive_generation:
+            # The backend was swapped (set_backend) while this request was
+            # still outstanding -- see _interactive_generation's comment in
+            # __init__. Dropped even if `image_path` is still the CURRENT
+            # image: _is_current alone cannot tell an old backend's answer
+            # apart from the new one's when the user did not navigate away,
+            # they just changed the model. `generation is None` (the
+            # empty-queue fallback in _pop_request_kind -- real dispatches
+            # always tag an int) means "unknown", not "stale": judged by
+            # _is_current alone instead, same as before this guard existed.
+            logger.info('Dropping interactive result from a superseded '
+                        'backend generation for %r (backend was swapped '
+                        'while this request was outstanding)', image_path)
             return
         if not self._is_current(image_path):
             return
@@ -776,6 +857,13 @@ class AssistController(QObject):
                 logger.info('Dropping late failed batch result for %r (batch '
                             'already finished/was cancelled, or superseded by '
                             'a newer run)', image_path)
+            return
+        if generation is not None and generation != self._interactive_generation:
+            # See the identical check (and the `generation is None` carve-out
+            # for the empty-queue fallback) in on_prediction_ready.
+            logger.info('Dropping interactive failure from a superseded '
+                        'backend generation for %r (backend was swapped '
+                        'while this request was outstanding)', image_path)
             return
         if not self._is_current(image_path):
             return

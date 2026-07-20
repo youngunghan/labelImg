@@ -36,10 +36,10 @@ from __future__ import annotations
 import logging
 
 try:
-    from PyQt5.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
+    from PyQt5.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
     from PyQt5.QtGui import QImage
 except ImportError:  # pragma: no cover - the app's PyQt4 fallback path
-    from PyQt4.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
+    from PyQt4.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal
     from PyQt4.QtGui import QImage
 
 __all__ = [
@@ -251,10 +251,10 @@ class InferenceService(QObject):
         thread will read.  Returns False when there is nothing to run.
         """
         if self._backend is None:
-            self.predictionFailed.emit(image_path or '', 'No model backend is loaded.')
+            self._emit_failed_deferred(image_path, 'No model backend is loaded.')
             return False
         if image is None:
-            self.predictionFailed.emit(image_path or '', 'No image to run the model on.')
+            self._emit_failed_deferred(image_path, 'No image to run the model on.')
             return False
 
         backend = self._backend
@@ -273,6 +273,37 @@ class InferenceService(QObject):
 
         self._executor.submit(job)
         return True
+
+    def _emit_failed_deferred(self, image_path, reason):
+        """Emit ``predictionFailed`` on a FRESH event-loop iteration instead
+        of in-process, for the two early-return checks in ``predict_async``
+        above.
+
+        Both of those checks run entirely on the calling thread -- there is
+        no worker/thread-pool hop -- so a direct ``self.predictionFailed.emit(...)``
+        there is a same-thread ``AutoConnection``, which Qt delivers as an
+        ordinary **synchronous** call into every connected slot, not a queued
+        one. Every OTHER path to this signal (the ``job()`` closure above,
+        run by the executor) genuinely crosses a thread boundary, so its
+        emit is queued for real; callers are entitled to assume every result
+        arrives in a fresh stack frame (see AssistController._advance_batch's
+        ``synchronous`` parameter and the module docstring's "results come
+        back through signals ... queued" claim). A synchronous emit from
+        here breaks that assumption invisibly: AssistController's batch
+        driver (_batch_step -> _dispatch_request -> predict_async ->
+        on_prediction_failed -> _advance_batch -> _batch_step) tail-calls the
+        next step INLINE on the strength of that same-frame guarantee, so a
+        run of consecutive backend-less/imageless dispatches (e.g. the
+        backend disappearing mid-batch-scan) would recurse in ONE unbroken
+        call stack until Python's recursion limit raises RecursionError --
+        the identical class already fixed for ``_batch_step``'s own
+        unreadable-file branch via ``QTimer.singleShot(0, ...)``. Deferring
+        the emit HERE restores the "queued" guarantee at its source for
+        every caller (batch or interactive), rather than special-casing the
+        batch driver against a signal that is not really queued.
+        """
+        QTimer.singleShot(
+            0, lambda: self.predictionFailed.emit(image_path or '', reason))
 
     def wait_for_done(self, msecs=30000):
         """Block until queued work drains (shutdown / tests). No-op for the
