@@ -43,13 +43,13 @@ labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pk
 | `SETTING_MODEL_PATH` | `model/path` | (포크, ML-assist) `yolo_onnx` 백엔드가 로드할 `.onnx` 파일 경로. 기본값 `None`(모델 미설정 → AI 액션 비활성) — `controller.py:131` |
 | `SETTING_CONF_THRESHOLD` | `model/confThreshold` | (포크, ML-assist) AI 메뉴 슬라이더의 신뢰도 임계값(0.0~1.0로 클램프, `AssistController._sanitize_threshold`). 기본값 `DEFAULT_CONF_THRESHOLD=0.5`(`controller.py:48, 132-133`) |
 
-세 키 모두 `constants.py:24-26`에 정의되어 있다. `closeEvent`가 `model_path`/`threshold`는 그대로 기록하지만(`labelImg.py:1471-1472`), `SETTING_MODEL_BACKEND`만은 **조건부**다: `self.assist.backend_name`이 실제로(사용자가 고른 값으로) 설정돼 있을 때만 쓰고, 아무것도 설정된 적이 없으면 그 키를 아예 쓰지 않을 뿐 아니라 이미 pkl에 남아 있는 레거시 값도 지운다(`labelImg.py:1449-1472`). 예전에는 `self.assist.backend_name`을 무조건 기록했는데, `DEFAULT_BACKEND`가 아직 `'stub'`이던 시절엔 이 무조건 기록이 바로 그 값을 사용자 pkl에 영구히 박아 넣은 원인이었다 — 위 `SETTING_MODEL_BACKEND` 행의 ⚠️ 참고.
+세 키 모두 `constants.py:24-26`에 정의되어 있다. `closeEvent`가 `model_path`/`threshold`는 그대로 기록하지만(`labelImg.py:1485-1486`), `SETTING_MODEL_BACKEND`만은 **조건부**다: `self.assist.backend_name`이 실제로(사용자가 고른 값으로) 설정돼 있을 때만 쓰고, 아무것도 설정된 적이 없으면 그 키를 아예 쓰지 않을 뿐 아니라 이미 pkl에 남아 있는 레거시 값도 지운다(`labelImg.py:1463-1486`). 예전에는 `self.assist.backend_name`을 무조건 기록했는데, `DEFAULT_BACKEND`가 아직 `'stub'`이던 시절엔 이 무조건 기록이 바로 그 값을 사용자 pkl에 영구히 박아 넣은 원인이었다 — 위 `SETTING_MODEL_BACKEND` 행의 ⚠️ 참고.
 
-> ⚠️ `SETTING_WIN_GEOMETRY`(`window/geometry`)는 `constants.py:5`에 **정의만** 되어 있고 `closeEvent`에서는 저장되지 않는다 — 실제로 기록되는 창 키는 size/position/state뿐이다(`labelImg.py:1427-1429`).
+> ⚠️ `SETTING_WIN_GEOMETRY`(`window/geometry`)는 `constants.py:5`에 **정의만** 되어 있고 `closeEvent`에서는 저장되지 않는다 — 실제로 기록되는 창 키는 size/position/state뿐이다(`labelImg.py:1441-1443`).
 
-> ℹ️ **기록 조건**: `filename`은 단일 파일 모드에서만 실제 경로가 저장되고 폴더를 연 상태로 종료하면 `''`가 저장된다(`labelImg.py:1422-1425`). `savedir`·`lastOpenDir`도 종료 시점에 해당 경로가 존재하지 않으면 `''`로 기록된다(`labelImg.py:1434-1442`).
+> ℹ️ **기록 조건**: `filename`은 단일 파일 모드에서만 실제 경로가 저장되고 폴더를 연 상태로 종료하면 `''`가 저장된다(`labelImg.py:1436-1439`). `savedir`·`lastOpenDir`도 종료 시점에 해당 경로가 존재하지 않으면 `''`로 기록된다(`labelImg.py:1448-1456`).
 
-> ℹ️ **시작 시 우선순위 (로컬 수정, 2026-07-03)**: `labelImg.py 이미지폴더 [클래스파일] [저장폴더]` 형태로 명령줄 인자를 주고 시작하면, `__init__`(`labelImg.py:614`)이 `open_dir_dialog(dir_path=이미지폴더, silent=True)`를 호출하고 `open_dir_dialog`(`labelImg.py:1541-1553`)는 **명시된 `dir_path`를 pkl의 `lastOpenDir`보다 우선**한다. 다이얼로그 취소 시 상태 불변 조기 반환(`labelImg.py:1560-1562`). 이때 `default_save_dir`도 설정되는데, 명령줄 저장폴더 인자가 있으면 그것을 유지하고 없으면 연 폴더가 된다(`labelImg.py:1568-1571`). 따라서 pkl의 `savedir`·`lastOpenDir`는 그 세션에서 무시되고, 종료 시 새 값으로 갱신된다. pkl의 `savedir`는 명령줄 저장폴더 인자가 없을 때만 시작 시 적용된다(`labelImg.py:569-572`). (수정 전에는 pkl의 `lastOpenDir`가 명령줄 폴더보다 우선되어 라벨 XML을 찾지 못하는 문제가 있었다.)
+> ℹ️ **시작 시 우선순위 (로컬 수정, 2026-07-03)**: `labelImg.py 이미지폴더 [클래스파일] [저장폴더]` 형태로 명령줄 인자를 주고 시작하면, `__init__`(`labelImg.py:620`)이 `open_dir_dialog(dir_path=이미지폴더, silent=True)`를 호출하고 `open_dir_dialog`(`labelImg.py:1555-1567`)는 **명시된 `dir_path`를 pkl의 `lastOpenDir`보다 우선**한다. 다이얼로그 취소 시 상태 불변 조기 반환(`labelImg.py:1574-1576`). 이때 `default_save_dir`도 설정되는데, 명령줄 저장폴더 인자가 있으면 그것을 유지하고 없으면 연 폴더가 된다(`labelImg.py:1582-1585`). 따라서 pkl의 `savedir`·`lastOpenDir`는 그 세션에서 무시되고, 종료 시 새 값으로 갱신된다. pkl의 `savedir`는 명령줄 저장폴더 인자가 없을 때만 시작 시 적용된다(`labelImg.py:569-572`). (수정 전에는 pkl의 `lastOpenDir`가 명령줄 폴더보다 우선되어 라벨 XML을 찾지 못하는 문제가 있었다.)
 
 ## 기타 상수
 

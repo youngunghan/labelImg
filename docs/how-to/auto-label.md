@@ -31,7 +31,7 @@ MIT 사용자가 기대하지 않는 라이선스 의무가 딸려온다. 그래
 ## 내 `.onnx` 모델을 앱에 연결하기
 
 아직 모델 경로를 고르는 UI(파일 선택 대화상자)는 없다 — 백엔드/경로는 **설정 파일로만** 지정한다
-(`labelImg.py:1449-1450`의 주석: "there is no picker UI yet, so it is config-file driven"). 앱을 닫은
+(`labelImg.py:1463-1464`의 주석: "there is no picker UI yet, so it is config-file driven"). 앱을 닫은
 상태에서 아래처럼 한 번 써 주면 된다(`~/.labelImgSettings.pkl`에 저장됨, `libs/settings.py`):
 
 ```python
@@ -48,7 +48,7 @@ settings.save()
 키는 `model/backend` / `model/path` / `model/confThreshold`(`libs/constants.py:24-26`)다. 이후 앱을
 실행하면 `AssistController`가 시작할 때 이 설정을 읽어 백엔드를 구성한다
 (`AssistController.__init__`, `libs/assist/controller.py:85-219`). 신뢰도 임계값은 메뉴의 슬라이더로도
-바로 조절되고, 앱 종료 시 그 값이 같은 설정에 다시 저장된다(`labelImg.py:1451-1453`).
+바로 조절되고, 앱 종료 시 그 값이 같은 설정에 다시 저장된다(`labelImg.py:1486`).
 
 ### 지원하는 모델 출력 형식
 

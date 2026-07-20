@@ -147,13 +147,13 @@ still land in-bounds after drifting.
 
 NON-VACUOUSNESS
 ----------------
-As of this writing, this lint extracts and range-checks 789 citation groups
-across the whole doc surface, 280 of which also get a real symbol-location
+As of this writing, this lint extracts and range-checks 833 citation groups
+across the whole doc surface, 306 of which also get a real symbol-location
 check (computed by walking the extractor over every doc file -- not a guess).
 ``test_citation_extraction_is_non_vacuous`` asserts a lower bound on the
-789 figure and prints it when run with ``-v``; ``TestDocCitationSymbolsMatch
+833 figure and prints it when run with ``-v``; ``TestDocCitationSymbolsMatch
 .test_symbol_is_reachable_at_its_cited_location`` separately asserts a lower
-bound on the 280 figure and prints IT when run with ``-v`` (two different
+bound on the 306 figure and prints IT when run with ``-v`` (two different
 test methods, each printing its own count -- not one method printing both).
 
 This was verified empirically, twice, with different-sized mutations of

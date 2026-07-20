@@ -6,7 +6,7 @@ PASCAL VOC는 labelImg의 **기본 포맷**이다(ImageNet에서 쓰는 형식).
 
 1. 앱을 실행한다 → [install-and-build.md](install-and-build.md).
 2. `File → Open Dir`(`Ctrl+u`)로 이미지 폴더를 연다. 이때 저장 폴더는 **연 폴더로 자동 설정**된다 — 즉 기본적으로 XML이 이미지 옆에 생긴다.
-3. 다른 폴더에 저장하려면 **폴더를 연 뒤에** `File → Change Save Dir`(`Ctrl+r`)로 저장 폴더를 지정한다. ⚠️ 메뉴의 Open Dir는 저장 폴더를 연 폴더로 덮어쓰므로(`open_dir_dialog` 말미, `labelImg.py:1413`), Change Save Dir를 Open Dir보다 먼저 하면 지정이 소리 없이 무효가 된다. (명령줄 3번째 인자 `save_dir`로 시작한 경우에는 시작 시점에 그 폴더가 저장 폴더로 유지된다.)
+3. 다른 폴더에 저장하려면 **폴더를 연 뒤에** `File → Change Save Dir`(`Ctrl+r`)로 저장 폴더를 지정한다. ⚠️ 메뉴의 Open Dir는 저장 폴더를 연 폴더로 덮어쓰므로(`open_dir_dialog` 말미, `labelImg.py:1585`), Change Save Dir를 Open Dir보다 먼저 하면 지정이 소리 없이 무효가 된다. (명령줄 3번째 인자 `save_dir`로 시작한 경우에는 시작 시점에 그 폴더가 저장 폴더로 유지된다.)
 4. `Create RectBox`(`w`)로 박스를 그리고 라벨을 입력한다.
 5. 마우스 우드래그로 박스를 복사·이동할 수 있다.
 6. `Ctrl+s`로 저장한다.
@@ -50,7 +50,7 @@ PASCAL VOC는 labelImg의 **기본 포맷**이다(ImageNet에서 쓰는 형식).
 3. File List에서 이미지를 고르면 박스·라벨이 표시된다.
 4. `View → Display Labels`로 라벨 표시 on/off.
 
-단, `Change Save Dir`로 저장 폴더를 바꾼 상태라면 XML은 이미지 옆이 아니라 **저장 폴더**에서 찾는다(`labelImg.py:1220-1235`). 같은 이름의 `.xml` > `.txt`(YOLO) > `.json`(CreateML) 순으로 탐색된다.
+단, `Change Save Dir`로 저장 폴더를 바꾼 상태라면 XML은 이미지 옆이 아니라 **저장 폴더**에서 찾는다(`labelImg.py:1359-1373`). 같은 이름의 `.xml` > `.txt`(YOLO) > `.json`(CreateML) 순으로 탐색된다.
 
 ## 사전 정의 클래스
 

@@ -53,7 +53,7 @@ plus capability flags):
   pure display filter).
 - **`libs/shape.py`** gained `provisional` / `confidence` / `shape_type`. A
   model's guess is drawn dashed and translucent and is **never written to disk** — one
-  filter at the single save choke point (`save_labels`, `labelImg.py:1040`) drops every
+  filter at the single save choke point (`save_labels`, `labelImg.py:1054`) drops every
   provisional shape, so accepting one is exactly "clear the flag" and every existing
   VOC/YOLO/CreateML/COCO writer stays byte-for-byte the same for real annotations.
 - **No model weights ship with this fork.** Ultralytics YOLOv5/v8 weights are
@@ -192,7 +192,7 @@ Effort: **S** small / **M** medium / **L** large.
 
 1. ~~**[M] YOLO reader crash-safety**~~ — **done (2026-07-07)**: missing `classes.txt`
    raises `YoloParseError` → error dialog; malformed lines are skipped and counted
-   (`libs/yolo_io.py:104-168`, `labelImg.py:2189-2209`), with regression tests.
+   (`libs/yolo_io.py:104-168`, `labelImg.py:2244-2265`), with regression tests.
 2. ~~**[S] Consistent text encodings**~~ — **done (2026-07-08)**: all YOLO and
    CreateML I/O call sites now read/write UTF-8; non-ASCII labels round-trip
    (regression-tested with Korean labels).

@@ -71,13 +71,13 @@ Canvas는 윈도우에 **7개 시그널**로 보고한다(`libs/canvas.py:24-31`
 | `lightRequest(int)` | Ctrl+Shift+휠 | `light_request` |
 | `scrollRequest(int,int)` | 휠/드래그 패닝 | `scroll_request` |
 
-반대 방향으로 MainWindow는 Canvas의 메서드(`load_pixmap`, `load_shapes`, `set_last_label`, `select_shape`, `delete_selected`, `copy_selected_shape`, `set_editing`, `set_shape_visible` 등)를 직접 호출해 캔버스를 구동한다(예: `load_pixmap` `labelImg.py:1313`, `load_shapes` `:1006`, `set_last_label` `:1144`, `select_shape` `:1104`, `delete_selected` `:2078`). 시그널 연결 자체는 `__init__`의 `labelImg.py:220-237`에서 이뤄진다. 즉 **Canvas→Window는 시그널, Window→Canvas는 직접 호출**이라는 단방향성을 가진 MVC 변형이다.
+반대 방향으로 MainWindow는 Canvas의 메서드(`load_pixmap`, `load_shapes`, `set_last_label`, `select_shape`, `delete_selected`, `copy_selected_shape`, `set_editing`, `set_shape_visible` 등)를 직접 호출해 캔버스를 구동한다(예: `load_pixmap` `labelImg.py:1327`, `load_shapes` `:1020`, `set_last_label` `:1158`, `select_shape` `:1118`, `delete_selected` `:2133`). 시그널 연결 자체는 `__init__`의 `labelImg.py:220-237`에서 이뤄진다. 즉 **Canvas→Window는 시그널, Window→Canvas는 직접 호출**이라는 단방향성을 가진 MVC 변형이다.
 
 ### 3. Shape — 모델(박스 1개)
 
 `Shape`(`libs/shape.py:23`)는 어노테이션 하나를 표현한다: `points`(꼭짓점, 사각형은 최대 4점 — `reach_max_points`가 `len>=4`로 제한, `libs/shape.py:84-87`), `label`, `difficult` 플래그, 닫힘 상태 `_closed`, 선택/하이라이트 상태, 색상. 자기 자신을 `paint(painter)`로 그리고(`libs/shape.py:104`), `contains_point`·`nearest_vertex`로 히트테스트, `move_by`·`move_vertex_by`로 이동, `copy()`로 복제한다.
 
-색상·`point_size`·`scale`·`label_font_size`는 **클래스 변수**라(`libs/shape.py:36-47`) 한 곳에서 바꾸면 모든 `Shape`에 적용된다. MainWindow는 이를 전역 설정처럼 갱신한다(`Shape.line_color`/`Shape.difficult` 등). 단, 인스턴스에 `line_color`를 대입하면 인스턴스 속성이 클래스 색을 가린다 — `__init__` 인자는 그리기 중인 펜딩 라인 색에 쓰이고(`libs/canvas.py:47`), 라벨별 색(`generate_color_by_text`)은 로드/라벨 부여 시 `shape.line_color = ...` 직접 대입으로 입혀진다(`labelImg.py:994-1002`, `libs/canvas.py:683-687`).
+색상·`point_size`·`scale`·`label_font_size`는 **클래스 변수**라(`libs/shape.py:36-47`) 한 곳에서 바꾸면 모든 `Shape`에 적용된다. MainWindow는 이를 전역 설정처럼 갱신한다(`Shape.line_color`/`Shape.difficult` 등). 단, 인스턴스에 `line_color`를 대입하면 인스턴스 속성이 클래스 색을 가린다 — `__init__` 인자는 그리기 중인 펜딩 라인 색에 쓰이고(`libs/canvas.py:47`), 라벨별 색(`generate_color_by_text`)은 로드/라벨 부여 시 `shape.line_color = ...` 직접 대입으로 입혀진다(`labelImg.py:1008-1011`, `libs/canvas.py:683-687`).
 
 포크 확장(신규)으로 `Shape`는 `provisional`/`confidence`/`shape_type` 필드도 갖는다(`libs/shape.py:57-64`). `provisional=True`인 도형은 AI가 제안했을 뿐 사용자가 아직 받아들이지 않은 박스로, `paint()`가 점선 윤곽 + 반투명 채움으로 다르게 그린다(`libs/shape.py:110-113`, `:162-164`). 자세한 수명주기는 아래 **AI 어시스트 컨트롤러** 절과 [ml-assist-architecture.md](ml-assist-architecture.md) §provisional Shape 수명주기를 참고.
 
@@ -88,9 +88,9 @@ Canvas는 윈도우에 **7개 시그널**로 보고한다(`libs/canvas.py:24-31`
 - `LabelFileFormat.PASCAL_VOC` → `save_pascal_voc_format` → `PascalVocWriter`
 - `LabelFileFormat.YOLO` → `save_yolo_format(..., label_hist)` → `YOLOWriter`
 - `LabelFileFormat.CREATE_ML` → `save_create_ml_format(..., label_hist)` → `CreateMLWriter`
-- `LabelFileFormat.COCO` → `save_coco_format(..., label_hist)` → `COCOWriter`(포크 확장, 신규 — 이미지별 파일이 아니라 **데이터셋 json 병합**. `save_labels`의 COCO 분기가 호출자의 이미지별 경로를 버리고 `coco_dataset_target()`으로 갈아끼운다, `labelImg.py:1058-1069`. 근거는 [annotation-formats.md](annotation-formats.md) §COCO)
+- `LabelFileFormat.COCO` → `save_coco_format(..., label_hist)` → `COCOWriter`(포크 확장, 신규 — 이미지별 파일이 아니라 **데이터셋 json 병합**. `save_labels`의 COCO 분기가 호출자의 이미지별 경로를 버리고 `coco_dataset_target()`으로 갈아끼운다, `labelImg.py:1072-1083`. 근거는 [annotation-formats.md](annotation-formats.md) §COCO)
 
-직렬화 직전, 이 디스패치 자체가 **단일 저장 초크포인트**다: 캔버스의 모든 도형 중 `provisional`(AI가 제안했지만 아직 수락되지 않은 도형, 포크 확장·신규)인 것은 여기서 걸러진다 — `shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.provisional]`(`labelImg.py:1040`). `Ctrl+S`·Save As·Export COCO...·verify·자동저장 등 **모든** 저장 경로가 `_save_file` → `save_labels`로 수렴하므로, 이 한 줄이 포맷·경로에 상관없이 미확정 AI 추측이 디스크로 새는 것을 막는다. 자세한 수명주기는 아래 **AI 어시스트 컨트롤러** 절.
+직렬화 직전, 이 디스패치 자체가 **단일 저장 초크포인트**다: 캔버스의 모든 도형 중 `provisional`(AI가 제안했지만 아직 수락되지 않은 도형, 포크 확장·신규)인 것은 여기서 걸러진다 — `shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.provisional]`(`labelImg.py:1054`). `Ctrl+S`·Save As·Export COCO...·verify·자동저장 등 **모든** 저장 경로가 `_save_file` → `save_labels`로 수렴하므로, 이 한 줄이 포맷·경로에 상관없이 미확정 AI 추측이 디스크로 새는 것을 막는다. 자세한 수명주기는 아래 **AI 어시스트 컨트롤러** 절.
 
 `LabelFile`은 포맷별 writer를 아는 **얇은 파사드**다. PascalVOC/YOLO/**COCO** 경로에서는 각 writer로 위임하기 전에 `convert_points_to_bnd_box`로 다각형 points를 축 정렬 박스 `(x_min,y_min,x_max,y_max)`로 환원한다(정의 `libs/labelFile.py:182-205`, 호출 `:79`(COCO)·`:109`(VOC)·`:139`(YOLO) — 이때 x_min/y_min<1은 1로 클램프, `:196-203`). 단 CreateML 경로는 예외로, `LabelFile`이 shape dict를 그대로 넘기고 `CreateMLWriter.write()`가 내부에서 꼭짓점 순서를 가정해 중심좌표+폭·높이로 변환한다(`libs/create_ml_io.py:39-58`). 로드는 대칭으로 `PascalVocReader`/`YoloReader`/`CreateMLReader`/`COCOReader`가 라벨 파일을 읽어 `(label, points, None, None, difficult)` 5-튜플 리스트를 돌려주고, MainWindow가 이를 `Shape`로 복원해 Canvas에 싣는다(단 CreateMLReader는 포맷에 difficult 필드가 없어 마지막 요소를 항상 True로 채우고 — `libs/create_ml_io.py:133` — COCOReader는 반대로 항상 False로 채운다, `libs/coco_io.py:335-336`). 포맷별 정확한 구조는 [annotation-formats.md](annotation-formats.md) · [../reference/formats.md](../reference/formats.md).
 
@@ -99,7 +99,7 @@ Canvas는 윈도우에 **7개 시그널**로 보고한다(`libs/canvas.py:24-31`
 포크 확장으로 `MainWindow`는 두 개의 얇은 컨트롤러 객체를 **생성·소유·배선**한다(`labelImg.py:444-446`):
 
 - **`InferenceService`**(QObject, `libs/inference/service.py:186`) — 모델 백엔드를 들고 단일 워커 `QThreadPool`에서 추론을 돌리고 결과를 queued 시그널로 낸다.
-- **`AssistController`**(QObject, `libs/assist/controller.py:112`) — AI 액션(Auto-label Image = Ctrl+I, Accept All = Ctrl+Return, Reject All = Ctrl+Backspace, 신뢰도 슬라이더), provisional 도형 수명주기를 소유한다. 만들어진 액션은 새 **AI 메뉴**(`labelImg.py:478`, `:504`)와 이미지-의존 액션 집합 `onLoadActive`(`labelImg.py:468-471`)에 등록되고, `toggle_actions()`가 활성화 여부를 정리한 뒤 `AssistController.refresh_actions()`가 모델 유무에 따라 다시 손본다(`labelImg.py:746`).
+- **`AssistController`**(QObject, `libs/assist/controller.py:112`) — AI 액션(Auto-label Image = Ctrl+I, Accept All = Ctrl+Return, Reject All = Ctrl+Backspace, 신뢰도 슬라이더), provisional 도형 수명주기를 소유한다. 만들어진 액션은 새 **AI 메뉴**(`labelImg.py:478`, `:504`)와 이미지-의존 액션 집합 `onLoadActive`(`labelImg.py:468-471`)에 등록되고, `toggle_actions()`가 활성화 여부를 정리한 뒤 `AssistController.refresh_actions()`가 모델 유무에 따라 다시 손본다(`labelImg.py:752`).
 
 핵심은 **경계**다: 두 컨트롤러 안의 코드가 `MainWindow`로 새어 들어오지 않는다 — `MainWindow`가 만지는 것은 생성·소유·배선과 위 저장 초크포인트의 필터 한 줄뿐이다. `libs/inference/`의 코어(`types`/`backend`/`stub`/`registry`)는 PyQt5를 import하지 않으며, 모델 백엔드는 `ModelBackend` ABC(`libs/inference/backend.py:36`, `predict`/`segment`/`embed`)라는 하나의 심(seam) 뒤에 있다 — 결정론적인 `StubBackend`와 실제 ONNX YOLO 추론을 하는 `YoloOnnxBackend`(`libs/inference/yolo_onnx.py`)가 같은 인터페이스로 교체 가능하다.
 

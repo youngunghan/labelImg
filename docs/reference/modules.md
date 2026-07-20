@@ -8,28 +8,28 @@
 |---|---|---|
 | `WindowMixin` | `:57` | `QMainWindow`에 `menu()`/`toolbar()` 생성 헬퍼 믹스인 |
 | `MainWindow` | `:76` | 앱 컨트롤러(God-object). `QMainWindow`+`WindowMixin` 다중상속 |
-| `inverted(color)` | `:2352` | RGB 반전 `QColor` |
-| `read(filename, default)` | `:2356` | `QImageReader`(autoTransform=EXIF 회전)로 `QImage` 읽기 |
-| `get_main_app(argv)` | `:2365` | `QApplication`(기존 인스턴스 재사용)+argparse(image_dir/class_file/save_dir)+`MainWindow` |
-| `main()` | `:2400` | 엔트리포인트(`get_main_app` → `exec_`) |
+| `inverted(color)` | `:2388` | RGB 반전 `QColor` |
+| `read(filename, default)` | `:2392` | `QImageReader`(autoTransform=EXIF 회전)로 `QImage` 읽기 |
+| `get_main_app(argv)` | `:2401` | `QApplication`(기존 인스턴스 재사용)+argparse(image_dir/class_file/save_dir)+`MainWindow` |
+| `main()` | `:2436` | 엔트리포인트(`get_main_app` → `exec_`) |
 
 `MainWindow` 주요 메서드:
 
 | 메서드 | 위치 | 역할 |
 |---|---|---|
 | `__init__` | `:79` | Settings 로드, 위젯/액션/메뉴/툴바/도크 전체 구성(AI 메뉴 포함), `AssistController`/`InferenceService` 생성(`:444-446`), Canvas 시그널 연결 |
-| `set_format` / `change_format` | `:626` / `:651` | 포맷 표시 갱신 / VOC→YOLO→CreateML→COCO 순환(`:651-661`) |
-| `set_dirty` / `set_clean` / `toggle_actions` | `:726` / `:730` / `:735` | 저장 필요 상태·이미지 의존 액션 활성화. `toggle_actions`는 `onLoadActive` 루프 **다음에** `self.assist.refresh_actions()`를 호출한다(`:743-746`) — 이미지가 열렸다고 AI 액션까지 켜지는 건 아니고(백엔드 없으면 계속 꺼짐), 루프가 먼저 켜버린 것을 되돌린다 |
-| `reset_state` | `:754` | 도형/라벨리스트/캔버스 초기화 + `self.assist.forget_suggestions()`(`:764-769`)로 AI 추적 상태도 정리 |
-| `add_label` / `remove_label` / `load_labels` | `:932` / `:945` / `:963` | Shape↔리스트 항목 동기화. `remove_label`은 모든 제거를 `self.assist.discard_shape(shape)`에 보고한다(`:954-961`) — 사용자가 직접 지운 제안(suggestion)도 AI 레이어가 추적을 놓치지 않도록 |
-| `save_labels` | `:1019` | 포맷별 `LabelFile.save_*_format` 호출(입출력 디스패처, COCO 분기 `:1058-1069`). **`shape.provisional`인 도형은 저장 직전 필터링**되어 어떤 포맷에도 기록되지 않는다(`:1040`) — Ctrl+S/Save As/Export COCO.../verify_image/자동저장이 모두 거치는 단일 choke point |
-| `new_shape` | `:1120` | `newShape` 슬롯; LabelDialog 팝업 후 라벨 부여 |
-| `shape_selection_changed` / `label_selection_changed` / `label_item_changed` | `:917` / `:1100` / `:1109` | 선택/체크 상태 상호 동기화 |
-| `zoom_request` / `light_request` / `scroll_request` / `paint_canvas` | `:1175` / `:1227` / `:1159` / `:1388` | 줌·밝기·스크롤·스케일·페인트 |
-| `load_file` | `:1255` | 이미지/라벨파일 판별·로드, `canvas.load_pixmap`, 어노테이션 자동 로드 |
-| `show_bounding_box_from_annotation_file` | `:1342` | xml > txt > json 우선순위로 어노테이션 자동 탐색(json은 `load_json_by_filename`으로 CreateML/COCO 콘텐츠 스니핑) |
-| `is_same_path` / `coco_dataset_target` | `:665` / `:670` | (포크, COCO) 대소문자 무시 경로 비교(staticmethod) · 이 세션이 병합해 쓸 COCO 데이터셋 json 경로 결정 — 명시적으로 고른 `coco_dataset_path` 우선, 없으면 `<save dir>/annotations.json`(save dir도 없으면 이미지 폴더), 그마저 없으면 `None`(`:670-687`) → [formats.md](formats.md) |
-| `open_dir_dialog` | `:1541` | 디렉터리 열기 진입점(시작 시 `__init__` `:614`에서 `dir_path`+`silent=True`로 호출). (로컬 수정 2026-07-03) `dir_path` 인자가 명시되면 설정 pkl의 `lastOpenDir`보다 우선(`:1548-1553`) · 다이얼로그 취소 시 상태 불변 조기 반환(`:1560-1562`) · `default_save_dir`를 임포트 전에 확정 — 시작 시 명령줄 `save_dir`가 있으면 그것을 유지, 없으면 연 폴더(`:1568-1571`) |
+| `set_format` / `change_format` | `:632` / `:657` | 포맷 표시 갱신 / VOC→YOLO→CreateML→COCO 순환(`:657-667`) |
+| `set_dirty` / `set_clean` / `toggle_actions` | `:732` / `:736` / `:741` | 저장 필요 상태·이미지 의존 액션 활성화. `toggle_actions`는 `onLoadActive` 루프 **다음에** `self.assist.refresh_actions()`를 호출한다(`:747-752`) — 이미지가 열렸다고 AI 액션까지 켜지는 건 아니고(백엔드 없으면 계속 꺼짐), 루프가 먼저 켜버린 것을 되돌린다 |
+| `reset_state` | `:760` | 도형/라벨리스트/캔버스 초기화 + `self.assist.forget_suggestions()`(`:770-775`)로 AI 추적 상태도 정리 |
+| `add_label` / `remove_label` / `load_labels` | `:946` / `:959` / `:977` | Shape↔리스트 항목 동기화. `remove_label`은 모든 제거를 `self.assist.discard_shape(shape)`에 보고한다(`:968-975`) — 사용자가 직접 지운 제안(suggestion)도 AI 레이어가 추적을 놓치지 않도록 |
+| `save_labels` | `:1033` | 포맷별 `LabelFile.save_*_format` 호출(입출력 디스패처, COCO 분기 `:1072-1083`). **`shape.provisional`인 도형은 저장 직전 필터링**되어 어떤 포맷에도 기록되지 않는다(`:1054`) — Ctrl+S/Save As/Export COCO.../verify_image/자동저장이 모두 거치는 단일 choke point |
+| `new_shape` | `:1134` | `newShape` 슬롯; LabelDialog 팝업 후 라벨 부여 |
+| `shape_selection_changed` / `label_selection_changed` / `label_item_changed` | `:931` / `:1114` / `:1123` | 선택/체크 상태 상호 동기화 |
+| `zoom_request` / `light_request` / `scroll_request` / `paint_canvas` | `:1189` / `:1241` / `:1173` / `:1402` | 줌·밝기·스크롤·스케일·페인트 |
+| `load_file` | `:1269` | 이미지/라벨파일 판별·로드, `canvas.load_pixmap`, 어노테이션 자동 로드 |
+| `show_bounding_box_from_annotation_file` | `:1356` | xml > txt > json 우선순위로 어노테이션 자동 탐색(json은 `load_json_by_filename`으로 CreateML/COCO 콘텐츠 스니핑) |
+| `is_same_path` / `coco_dataset_target` | `:671` / `:676` | (포크, COCO) 대소문자 무시 경로 비교(staticmethod) · 이 세션이 병합해 쓸 COCO 데이터셋 json 경로 결정 — 명시적으로 고른 `coco_dataset_path` 우선, 없으면 `<save dir>/annotations.json`(save dir도 없으면 이미지 폴더), 그마저 없으면 `None`(`:676-693`) → [formats.md](formats.md) |
+| `open_dir_dialog` | `:1555` | 디렉터리 열기 진입점(시작 시 `__init__` `:620`에서 `dir_path`+`silent=True`로 호출). (로컬 수정 2026-07-03) `dir_path` 인자가 명시되면 설정 pkl의 `lastOpenDir`보다 우선(`:1562-1567`) · 다이얼로그 취소 시 상태 불변 조기 반환(`:1574-1576`) · `default_save_dir`를 임포트 전에 확정 — 시작 시 명령줄 `save_dir`가 있으면 그것을 유지, 없으면 연 폴더(`:1582-1585`) |
 | `import_dir_images` / `scan_all_images` / `open_next_image` / `open_prev_image` | `:1588` / `:1493` / `:1671` / `:1646` | 디렉터리 스캔·이미지 탐색(재귀 `os.walk` — COCO의 basename 충돌 경로가 여기서 발생) |
 | `save_file` / `save_file_as` | `:1716` / `:1742` | 저장 경로 결정 → `save_labels` |
 | `classify_current_image` / `undo_classify` / `create_classify_actions` / `edit_classify_categories` / `rebuild_classify_actions` | `:1805` / `:1964` / `:2003` / `:2016` / `:2075` | (로컬 확장) 사용자 정의 카테고리(기본 g→good·b→bad, `SETTING_CLASSIFY_TARGETS`) 단축키로 현재 이미지+라벨(.xml/.txt/.json)을 형제 폴더 `<폴더>_<이름>`으로 이동 후 다음 이미지 표시, Ctrl+Z로 직전 분류 원복. File > Edit Classify Categories로 카테고리를 라이브 편집(메뉴/단축키 재구성, 재시작 불필요). 라벨은 `default_save_dir` 우선, 없으면 이미지 옆에서 탐색(라벨 없이 이미지만 이동되면 상태바 경고). 내부 헬퍼 `_cleanup_dest_dir` `:1837` / `_taken` `:1854` / `_rollback` `:1867` |
@@ -37,7 +37,7 @@
 | `load_pascal_xml_by_filename` / `load_yolo_txt_by_filename` | `:2231` / `:2244` | 각 Reader 인스턴스화 → `load_labels`. YOLO는 로드 실패(`YoloParseError` 등)를 에러 대화상자로 처리하고 불량 라인 수를 상태바에 표시(`:2255-2264`) |
 | `load_json_by_filename` / `load_create_ml_json_by_filename` / `load_coco_json_by_filename` | `:2267` / `:2279` / `:2292` | (포크, COCO) `load_json_by_filename`이 `is_coco_json`으로 콘텐츠를 먼저 스니핑해 COCO/CreateML 리더를 고른다(`:2268-2277`) → [formats.md](formats.md). `load_coco_json_by_filename`은 데이터셋에 이 이미지가 없으면(`found_image=False`) 포맷을 바꾸지 않고 `False`를 반환한다(`:2299-2317`) |
 | `import_coco_dialog` / `export_coco_dialog` | `:2319` / `:2348` | (포크, COCO) File > Import/Export COCO... 핸들러 — 데이터셋 json을 골라 현재 이미지를 불러오거나(Import) 병합 저장(Export)하고, 고른 경로를 이후 저장의 타깃으로 고정한다(`coco_dataset_path`) |
-| `closeEvent` | `:1417` | 대부분의 `SETTING_*` 키(창 크기/위치, 색상, 마지막 포맷 등) 기록 후 `Settings.save()`. `SETTING_MODEL_BACKEND`만 예외로 **조건부** 기록이다 — `self.assist.backend_name`이 실제로 설정된 값일 때만 쓰고, 아무것도 설정되지 않았으면 그 키를 아예 쓰지 않는다(레거시 키가 남아 있으면 지운다, `:1449-1472`) → [settings.md](settings.md) |
+| `closeEvent` | `:1431` | 대부분의 `SETTING_*` 키(창 크기/위치, 색상, 마지막 포맷 등) 기록 후 `Settings.save()`. `SETTING_MODEL_BACKEND`만 예외로 **조건부** 기록이다 — `self.assist.backend_name`이 실제로 설정된 값일 때만 쓰고, 아무것도 설정되지 않았으면 그 키를 아예 쓰지 않는다(레거시 키가 남아 있으면 지운다, `:1463-1486`) → [settings.md](settings.md) |
 
 주의: 소스가 수정되면 (특히 후반부) 라인 번호가 밀릴 수 있다 — 정확한 위치는 심볼명 검색으로 재확인한다.
 
@@ -52,7 +52,7 @@
 박스 1개. 상수 `P_SQUARE/P_ROUND`(`:24`), `MOVE_VERTEX/NEAR_VERTEX`(`:26`). 지오메트리 종류 `RECT/POLYGON/POINT/LINE`(포크, ML-assist 대비, `:31-34` — Phase 1은 사각형만 그리지만 나중 단계가 도형 종류를 재정의하지 않고 추가할 수 있게 상수만 미리 마련해둠). 클래스 변수 색상·`point_size=16`·`scale`·`label_font_size=8`(`:38-47`).
 
 `__init__`(`:49-79`)이 받는 `shape_type` 인자와, 생성자에서 설정하는 두 AI 관련 필드(포크, ML-assist, `:57-64`):
-- `provisional`(bool, 기본 `False`) — 모델이 제안한 도형(사용자 데이터 아님) 표시. `Shape.paint`가 점선 윤곽+반투명 채움으로 그리고(`:110-113, 132-138, 159-164`), `MainWindow.save_labels`가 저장 직전 이 값이 `True`인 도형을 걸러낸다(`labelImg.py:1040`) — Accept로 `False`가 되기 전까지는 어떤 어노테이션 파일에도 절대 기록되지 않는다.
+- `provisional`(bool, 기본 `False`) — 모델이 제안한 도형(사용자 데이터 아님) 표시. `Shape.paint`가 점선 윤곽+반투명 채움으로 그리고(`:110-113, 132-138, 159-164`), `MainWindow.save_labels`가 저장 직전 이 값이 `True`인 도형을 걸러낸다(`labelImg.py:1054`) — Accept로 `False`가 되기 전까지는 어떤 어노테이션 파일에도 절대 기록되지 않는다.
 - `confidence`(float|None, 기본 `None`) — 모델 신뢰도 점수. AI 메뉴의 임계값 슬라이더가 재추론 없이 이 값으로만 화면 표시를 다시 필터링한다(`libs/assist/controller.py`).
 - `shape_type`(기본 `Shape.RECT`) — 도형 종류.
 

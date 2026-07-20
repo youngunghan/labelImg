@@ -10,11 +10,11 @@
 | `Ctrl+U` | 디렉터리 열기(Open Dir) — 모든 이미지 로드 |
 | `Ctrl+R` | 기본 어노테이션 저장 디렉터리 변경 |
 | `Ctrl+Shift+O` | 어노테이션 파일 열기 |
-| (메뉴 전용) | **File > Import COCO...** — COCO 데이터셋 json을 골라 현재 이미지의 박스를 불러옴(`labelImg.py:257-258, 2264`) |
-| (메뉴 전용) | **File > Export COCO...** — COCO 데이터셋 json을 골라(또는 새로 만들어) 현재 이미지를 병합 저장(`labelImg.py:259-260, 2293`) |
+| (메뉴 전용) | **File > Import COCO...** — COCO 데이터셋 json을 골라 현재 이미지의 박스를 불러옴(`labelImg.py:257-258, 2319`) |
+| (메뉴 전용) | **File > Export COCO...** — COCO 데이터셋 json을 골라(또는 새로 만들어) 현재 이미지를 병합 저장(`labelImg.py:259-260, 2348`) |
 | `Ctrl+S` | 저장 |
 | `Ctrl+Shift+S` | 다른 이름으로 저장(Save As) |
-| `Ctrl+Y` | 저장 포맷 전환(PascalVOC→YOLO→CreateML→COCO 순환, `labelImg.py:651-661`) |
+| `Ctrl+Y` | 저장 포맷 전환(PascalVOC→YOLO→CreateML→COCO 순환, `labelImg.py:657-667`) |
 | `Ctrl+W` | 현재 파일 닫기 |
 | `Ctrl+Shift+D` | 현재 이미지 삭제 |
 | `d` / `a` | 다음 / 이전 이미지 |
@@ -77,7 +77,7 @@
 | (메뉴 전용) | **Score Folder for Active Learning** — 폴더의 모든 이미지를 배치 추론해 이미지별 불확실성 점수를 매김. 두 번째 트리거는 **취소**(`score_folder`/`cancel_batch_scoring`, `controller.py:792-866`). 배치가 도는 동안은 `m_img_list`가 비어도 이 액션(취소 컨트롤)이 켜져 있다(`refresh_actions`의 `batch_running`, `:412-413`) |
 | (메뉴 전용) | **Restore Filesystem Order** — Sort by Uncertainty를 되돌려 원래 스캔 순서로 복원(`restore_original_order`, `controller.py:1030-1052`) |
 
-> 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1040`) → [formats.md](formats.md) · [modules.md](modules.md).
+> 제안(provisional) 박스는 사용자가 Accept하기 전까지 저장 파일에 절대 기록되지 않는다(`MainWindow.save_labels`의 단일 필터, `labelImg.py:1033-1054`) → [formats.md](formats.md) · [modules.md](modules.md).
 >
 > **Score/Sort/Restore Order에 단축키를 하나만 준 이유**: 이 포크는 이미 단축키 이중바인딩 버그를 한 번 겪었다(Single Class Mode가 Ctrl+Shift+S에서 옮겨진 이력, `controller.py:50-58` 주석 참조). `Ctrl+Shift+U`("Uncertainty")는 그 주석이 열거한 기존 바인딩 전부와 겹치지 않는 것을 확인하고 골랐다. Score Folder/Restore Order는 자주 쓰는 액션이 아니라 메뉴 전용으로 남겨, 사용자 정의 분류 카테고리(File > Edit Classify Categories)가 임의의 단일 키를 계속 자유롭게 쓸 수 있는 여지를 줄이지 않는다.
 
