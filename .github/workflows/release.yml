@@ -18,7 +18,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install pyinstaller pyqt5 lxml
+        # ".[ai]" pulls in this project's own REQUIRED_DEP (pyqt5, lxml) *and*
+        # EXTRA_DEP['ai'] (onnxruntime, numpy) straight from setup.py, so the
+        # release build can never drift from what libs/inference/yolo_onnx.py
+        # actually needs -- see labelImg.spec for why PyInstaller also needs
+        # collect_dynamic_libs()/collect_data_files() calls (not a blanket
+        # collect_all(), which drags in torch and breaks the build) to bundle
+        # onnxruntime correctly.
+        run: pip install pyinstaller ".[ai]"
       - name: Build Qt resources
         run: pyrcc5 -o libs/resources.py resources.qrc
       - name: Build exe (labelImg.spec bundles data/)

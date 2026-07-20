@@ -10,7 +10,7 @@
 | Diff vs upstream | 63 files, **+12,641 / −114** |
 | Core app (`labelImg.py`) | +754 / −34 |
 | New documentation | `docs/` tree: 21 files, ~2,050 lines (Diátaxis: tutorials / how-to / reference / explanation) |
-| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
+| Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`, surgically bundles onnxruntime + numpy into the exe when `[ai]` is installed at build time — no model weights, still no in-app picker); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
 | Tests | **280/280 passing**, 14 files (up from 30/8) — dependency-requiring tests SKIP on the base install rather than erroring |
 | Upstream bugs fixed | 6 crash / silent-failure / data-integrity defects (see table) |
 | CI | GitHub Actions: 3 jobs — core test matrix (Linux/Windows × Py3.9/3.12, headless Qt, base install only), `test-ai` (base + `[ai]` extra, exercises the ONNX-dependent tests), ruff critical-rules lint |
@@ -233,10 +233,21 @@ Effort: **S** small / **M** medium / **L** large.
     drives a real `MainWindow` (CLI dir import, move+advance, collision rename,
     fault-injected rollback, undo) and `tests/test_yolo_reader.py` covers the YOLO
     hardening; plain `unittest`, no new test dependency.
-16. ~~**[M] Release automation**~~ — **partially done (2026-07-08)**: `release.yml`
-    builds the Windows exe from `labelImg.spec` on `v*` tag push and attaches
-    exe + SHA256 to the GitHub Release. Remaining: `pyproject.toml` packaging
-    under a distinct distribution name.
+16. ~~**[M] Release automation**~~ — **partially done (2026-07-08, onnxruntime bundling fixed
+    2026-07-20)**: `release.yml` builds the Windows exe from `labelImg.spec` on `v*` tag push
+    and attaches exe + SHA256 to the GitHub Release. `release.yml` now installs `".[ai]"`
+    (not just `pyinstaller`) so the build environment has onnxruntime + numpy, and
+    `labelImg.spec` surgically bundles them into the exe (`collect_dynamic_libs` +
+    `collect_data_files` + a narrow hiddenimports list, with `torch`/
+    `onnxruntime.training`/`.quantization`/`.transformers` excluded -- a blanket
+    `collect_all('onnxruntime')` was tried first and broke the build by dragging in
+    `torch` via `onnxruntime.transformers.torch_onnx_export_helper`). Before this fix the
+    released exe shipped the AI *code* but not this *runtime*, so `build_backend()` always
+    hit `MissingDependency` inside the frozen app and the AI menu stayed permanently grey no
+    matter what the user configured -- see `docs/how-to/install-and-build.md`'s "onnxruntime
+    번들" section. The exe still ships **no model weights** (AGPL, see
+    `data/models/README.md`) and there is still no in-app model-path picker. Remaining:
+    `pyproject.toml` packaging under a distinct distribution name.
 17. **[M] Remove Python 2 / PyQt4 remnants** — dead import fallbacks in 15 files, no-op
     `ustr()` wrappers, `qt4py2` build paths; unblocks ruff/type-checking.
 18. ~~**[S] Demo GIF in README**~~ — **done (2026-07-08)**: an app-driven recording

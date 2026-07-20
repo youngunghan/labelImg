@@ -20,6 +20,12 @@ pip install -e ".[ai]"
 이 extra는 `onnxruntime>=1.15`와 `numpy`를 설치한다(`setup.py:26-28`). 기본 설치에는 포함되지 않는다 —
 `labelImg`는 이 extra 없이도 순수 라벨링 도구로 완전히 동작한다.
 
+**GitHub Release의 Windows exe를 쓰는 경우**는 이 단계가 필요 없다 — `labelImg.spec`이 빌드 시점에
+onnxruntime + numpy를 이미 exe 안에 번들해 두었다(자세한 내용은
+[`docs/how-to/install-and-build.md`](install-and-build.md#onnxruntime-onnx-런타임-번들)). 다만 그 exe에도
+모델 가중치는 들어있지 않으므로, 아래 "모델은 앱에 포함돼 있지 않다" 절과 "내 `.onnx` 모델을 앱에
+연결하기" 절은 exe 사용자에게도 그대로 적용된다.
+
 ## 모델은 앱에 포함돼 있지 않다 (그리고 왜)
 
 **이 저장소는 모델 가중치를 배포하지 않는다.** 가장 흔한 기본값일 Ultralytics YOLOv5/v8 사전학습

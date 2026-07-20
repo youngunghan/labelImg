@@ -46,6 +46,15 @@ published to PyPI, so install them from this checkout (from the repository
 root, not from `data/models/`):
 `pip install -e ".[ai]"` (onnxruntime + numpy).
 
+If you are instead running the prebuilt Windows exe from a GitHub Release,
+`labelImg.spec` already bundles onnxruntime + numpy into it (see
+[`docs/how-to/install-and-build.md`](../../docs/how-to/install-and-build.md#onnxruntime-onnx-런타임-번들)),
+so you do **not** need `pip install -e ".[ai]"` for that exe -- the runtime is
+already inside it. The exe still ships **no model weights**, though: the AI
+menu stays greyed out until you point `model/path` at your own `.onnx` file
+(see "Using your own model" above); there is still no in-app file picker for
+this.
+
 ### Exporting from Ultralytics (AGPL-3.0 -- applies to you)
 
 ```bash

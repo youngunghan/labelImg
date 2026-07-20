@@ -95,7 +95,32 @@ pyinstaller --hidden-import=pyqt5 --hidden-import=lxml -F -n "labelImg" -c label
 
 `labelImg.spec`도 함께 제공된다. macOS는 `setup.py`의 `py2app` 경로로 `.app`을 만들 수 있다(`build-tools/build-for-macos.sh`).
 
-> 참고(이 포크의 커스텀 동작): frozen exe는 `predefined_classes.txt`를 exe 옆 경로에 만들어 영속화한다(`labelImg.py`의 `get_persistent_classes_file`, 2177-2196행). 파일이 없으면 번들 기본값을 복사하고, 그것도 없으면 `person` 한 줄로 생성한다. Edit Default Classes(Ctrl+Shift+E)로 저장한 클래스 목록은 이 파일에 남는다. 위 원시 명령은 `data/`를 번들하지 않으므로, 번들 기본값까지 포함하려면 `pyinstaller labelImg.spec`(`datas=[(os.path.join(SPECPATH, 'data'), 'data')]`, `labelImg.spec:11`) 사용을 권장. 또한 원시 명령은 `-c`(콘솔 창 표시)인 반면 spec은 `console=False`(`labelImg.spec:35`)라 GUI 전용 exe가 만들어진다.
+> 참고(이 포크의 커스텀 동작): frozen exe는 `predefined_classes.txt`를 exe 옆 경로에 만들어 영속화한다(`labelImg.py`의 `get_persistent_classes_file`, 2177-2196행). 파일이 없으면 번들 기본값을 복사하고, 그것도 없으면 `person` 한 줄로 생성한다. Edit Default Classes(Ctrl+Shift+E)로 저장한 클래스 목록은 이 파일에 남는다. 위 원시 명령은 `data/`를 번들하지 않으므로, 번들 기본값까지 포함하려면 `pyinstaller labelImg.spec`(`datas=[(os.path.join(SPECPATH, 'data'), 'data')]`, `labelImg.spec:9`) 사용을 권장. 또한 원시 명령은 `-c`(콘솔 창 표시)인 반면 spec은 `console=False`(`labelImg.spec:109`)라 GUI 전용 exe가 만들어진다.
+
+### onnxruntime(ONNX 런타임) 번들
+
+`labelImg.spec`은 빌드 환경에 `onnxruntime`이 설치돼 있으면(`pip install -e ".[ai]"` 또는 CI의
+`pip install pyinstaller ".[ai]"`) `onnxruntime`/`numpy`를 exe 안에 함께 번들한다 — AI 자동 라벨링 코드
+(`libs/inference/yolo_onnx.py`)뿐 아니라 그 코드가 런타임에 실제로 필요로 하는 네이티브 런타임
+(`onnxruntime_pybind11_state*.pyd`, `onnxruntime.dll`, `onnxruntime_providers_shared.dll`)까지 함께
+들어간다는 뜻이다. 예전에는 exe에 AI *코드*만 들어가고 이 *런타임*이 빠져 있어서, 배포된 exe로는
+`build_backend()`가 항상 `MissingDependency`로 실패했다(AI 메뉴가 늘 회색으로 남았다) — 지금은 고쳐졌다.
+
+`collect_all('onnxruntime')`으로 통째로 긁는 방식은 시도했지만 빌드 자체가 깨진다: 그 방식이 함께 끌어오는
+`onnxruntime.transformers.torch_onnx_export_helper`(`import torch` 포함)를 PyInstaller가 정적 분석하려는
+순간 `pyinstaller-hooks-contrib`의 torch 훅이 격리 서브프로세스로 torch 서브모듈을 수집하려다 죽는다(exit
+code 3). 이 포크는 순수 CPU 추론만 쓰고 학습/양자화/변환기-내보내기 헬퍼는 전혀 쓰지 않으므로,
+`labelImg.spec`은 `collect_dynamic_libs('onnxruntime')` + `collect_data_files('onnxruntime')`와 추론에
+실제로 필요한 hiddenimports 몇 개만 골라 쓰고, `torch`/`onnxruntime.training`/`onnxruntime.quantization`/
+`onnxruntime.transformers`는 `Analysis(excludes=[...])`로 명시적으로 제외한다(`labelImg.spec:47-79`).
+`onnxruntime`이 빌드 환경에 없으면(기본 설치) 이 블록은 통째로 건너뛰고, `data/` 번들 등 나머지는 그대로인
+평범한(AI 비활성) exe가 만들어진다 — 빌드 실패가 아니라 런타임에 AI 메뉴가 꺼진 채로 동작한다.
+
+> ⚠️ **exe에는 여전히 모델 가중치가 들어있지 않다.** 이 번들은 *런타임*(onnxruntime 자체)일 뿐, `.onnx`
+> 가중치 파일이 아니다(라이선스 이유는 [`data/models/README.md`](../../data/models/README.md) 참고). 배포된
+> exe를 받아 AI 메뉴를 쓰려면 사용자가 직접 `.onnx` 파일을 구해 설정(`model/path`, `model/backend`)에
+> 지정해야 한다 — 앱 안에 모델을 고르는 파일 선택 UI는 아직 없다(자세한 절차는
+> [`docs/how-to/auto-label.md`](auto-label.md) 참고). "exe만 받으면 AI가 바로 동작한다"는 뜻이 아니다.
 
 > ⚠️ 작업 폴더에는 최신 `dist\labelImg.exe`와 구버전이 든 `dist_labelimg.zip`이 있다. `dist\labelImg.exe`는 **2026-07-03에 `pyinstaller labelImg.spec`으로 재빌드**된 최신 빌드로, 같은 날의 소스 수정(`open_dir_dialog` 재작성 등)과 `data/` 번들이 모두 반영돼 있다. 반면 루트의 `dist_labelimg.zip`에 들어 있는 `labelImg.exe`는 **2026-06-26 구버전 빌드**(zip 파일 자체의 최종 수정 시각은 06-29)로 이후 수정이 반영되어 있지 않다 — 특히 구 exe로 이미지 폴더를 명령줄 인자로 열면 설정 pkl의 `lastOpenDir`(이전 세션 폴더)가 우선되어 `default_save_dir`를 덮어쓰고, 연 폴더의 XML 라벨(박스)이 표시되지 않는 버그가 그대로 재현된다(현재 소스는 명령줄로 넘긴 폴더가 우선하도록 수정됨: `labelImg.py:1562-1567`, 시작 시 호출은 `labelImg.py:620`). 최신 동작이 필요하면 `dist\labelImg.exe`를 쓰거나 `python labelImg.py`로 소스 실행할 것.
 
