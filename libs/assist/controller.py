@@ -383,7 +383,16 @@ class AssistController(QObject):
 
         if backend_name is None:
             self.backend_name = None
-            self.model_path = None
+            # self.model_path is DELIBERATELY left alone -- only the BACKEND
+            # is turned off. Retaining it is what lets re-enabling be a
+            # single action (just flip the backend back to e.g. 'yolo_onnx')
+            # instead of forcing the user to re-browse for the same .onnx
+            # file every time they toggle AI off and back on. It is inert
+            # (harmless) while no backend is configured: is_available() and
+            # every AI action are gated on the backend, not on this path --
+            # see the SAFETY invariant traced in AssistController.__init__
+            # and _build_backend above.
+            #
             # Mirrors closeEvent's own "only persist a REAL choice" guard
             # (labelImg.py) -- dropping the key rather than writing a falsy
             # one keeps a fresh pickle and an explicitly-disabled one
@@ -391,11 +400,14 @@ class AssistController(QObject):
             # already assumes when it defaults an absent key to
             # DEFAULT_BACKEND (None).
             settings.data.pop(SETTING_MODEL_BACKEND, None)
-            # SETTING_MODEL_PATH is meaningless without a backend name to
-            # pair it with; leaving it behind is functionally inert (nothing
-            # reads it while SETTING_MODEL_BACKEND is absent) but stale, so
-            # it is dropped here too rather than left to rot in the pickle.
-            settings.data.pop(SETTING_MODEL_PATH, None)
+            # SETTING_MODEL_PATH is intentionally LEFT IN THE PICKLE here --
+            # the persisted counterpart of self.model_path above, kept for
+            # the exact same reason (remembering it across a disable so
+            # re-enabling does not require re-browsing). It is functionally
+            # inert while SETTING_MODEL_BACKEND is absent (nothing builds a
+            # backend from a path alone -- see AssistController.__init__ /
+            # _build_backend), so leaving it behind cannot silently re-enable
+            # AI on the next launch.
             settings.save()
             # A batch scan cannot run without a backend -- cancel one before
             # dropping it (mirrors on_directory_scanned's own

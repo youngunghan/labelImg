@@ -204,9 +204,14 @@ class TestApplyNoBackend(ModelSettingsTestCase):
     def setUp(self):
         super(TestApplyNoBackend, self).setUp()
         # Start from a CONFIGURED-and-available state, so turning it off is
-        # an observable transition rather than a no-op.
+        # an observable transition rather than a no-op. Both the in-memory
+        # attribute AND the settings dict are seeded (mirroring what a real
+        # prior apply_model_settings success would have left behind) so the
+        # retained-path assertions below have something genuine to observe
+        # surviving the disable, on disk as well as in memory.
         self.win.assist.backend_name = 'yolo_onnx'
         self.win.assist.model_path = '/previously/configured/model.onnx'
+        self.win.settings[SETTING_MODEL_PATH] = self.win.assist.model_path
         self.win.assist.set_backend(StubBackend())
         self.assertTrue(self.win.assist.is_available())
 
@@ -226,15 +231,80 @@ class TestApplyNoBackend(ModelSettingsTestCase):
         # Persisted to DISK immediately -- not deferred to closeEvent.
         self.assertNotIn(SETTING_MODEL_BACKEND, self.persisted())
 
-    def test_none_also_removes_the_now_stale_persisted_model_path_key(self):
-        # SETTING_MODEL_PATH means nothing without SETTING_MODEL_BACKEND to
-        # pair it with (functionally inert), but leaving it behind is
-        # untidy and could confuse anything reading the pickle directly --
-        # both keys are dropped together.
+    def test_none_retains_the_model_path_in_memory_and_on_disk(self):
+        # Disabling only turns the BACKEND off; the path is deliberately
+        # kept (both in-memory and in the pickle) so re-enabling later is a
+        # single action -- flip the backend back on -- rather than forcing
+        # the user to re-browse for the same .onnx file. It stays
+        # functionally inert while SETTING_MODEL_BACKEND is absent: nothing
+        # builds a backend from a path alone (see the SAFETY-invariant
+        # coverage in TestConfiguredPathAloneBuildsNoBackend).
         self.win.assist.apply_model_settings(None, '')
 
-        self.assertNotIn(SETTING_MODEL_PATH, self.win.settings.data)
-        self.assertNotIn(SETTING_MODEL_PATH, self.persisted())
+        self.assertEqual('/previously/configured/model.onnx', self.win.assist.model_path)
+        self.assertEqual('/previously/configured/model.onnx',
+                         self.win.settings.data.get(SETTING_MODEL_PATH))
+        self.assertEqual('/previously/configured/model.onnx',
+                         self.persisted().get(SETTING_MODEL_PATH))
+
+    def test_disable_then_reopening_the_dialog_prefills_the_retained_path(self):
+        # Drives ModelSettingsDialog's construction/_prefill path directly --
+        # NEVER exec()'d -- to confirm the retained path actually reaches the
+        # user the next time they open Model Settings, not just that
+        # AssistController's own attributes hold it.
+        self.win.assist.apply_model_settings(None, '')
+
+        dialog = ModelSettingsDialog(self.win.assist, parent=self.win)
+        try:
+            _label, selected = dialog.BACKEND_CHOICES[dialog.backend_combo.currentIndex()]
+            self.assertIsNone(selected, 'backend must still show as off')
+            self.assertEqual('/previously/configured/model.onnx', dialog.path_edit.text())
+        finally:
+            dialog.deleteLater()
+
+
+class TestConfiguredPathAloneBuildsNoBackend(ModelSettingsTestCase):
+    """SAFETY INVARIANT for the retained-path change (see
+    AssistController.apply_model_settings' disable branch): a persisted
+    SETTING_MODEL_PATH with NO SETTING_MODEL_BACKEND must NEVER cause AI to
+    come up silently enabled, or a backend to get constructed, on a fresh
+    launch. This is the entire risk the retained-path change carries, so it
+    gets its own end-to-end coverage (a fresh AssistController reading a
+    fresh pickle) rather than relying only on the in-process assertions the
+    disable tests above already make.
+
+    Mirrors TestStubIsNotExposed.test_a_legacy_persisted_stub_is_still_treated_as_unset's
+    "build a second, independent MainWindow off a pre-seeded pickle" idiom.
+    """
+
+    def test_a_persisted_path_with_no_backend_builds_no_backend_on_a_fresh_launch(self):
+        tmp2 = tempfile.TemporaryDirectory()
+        try:
+            dir2 = os.path.join(tmp2.name, 'photos')
+            os.makedirs(dir2)
+            img = QImage(IMAGE_SIZE, IMAGE_SIZE, QImage.Format_RGB32)
+            img.fill(0xffffffff)
+            img.save(os.path.join(dir2, 'a.png'))
+            settings_path = os.path.join(self.tmp.name, '.labelImgSettings.pkl')
+            with open(settings_path, 'wb') as handle:
+                pickle.dump({SETTING_MODEL_PATH: '/some/retained/model.onnx'},
+                           handle, pickle.HIGHEST_PROTOCOL)
+
+            with mock.patch('os.path.expanduser', return_value=self.tmp.name):
+                app2, win2 = get_main_app([sys.argv[0], dir2])
+            try:
+                self.assertIsNone(win2.assist.backend_name)
+                self.assertEqual('/some/retained/model.onnx', win2.assist.model_path)
+                self.assertFalse(win2.assist.is_available())
+                self.assertIsNone(win2.inference_service.backend())
+                for action in [a for a in win2.assist_actions
+                              if a is not win2.assist.action_model_settings]:
+                    self.assertFalse(action.isEnabled(), action.text())
+            finally:
+                win2.dirty = False
+                win2.close()
+        finally:
+            tmp2.cleanup()
 
 
 class TestBadPath(ModelSettingsTestCase):
@@ -353,6 +423,29 @@ class TestApplySucceedsWithARealModel(ModelSettingsTestCase):
         self.assertIsNotNone(backend)
         self.assertEqual('yolo_onnx', backend.name)
         self.assertEqual(['cat', 'dog'], backend.class_names)
+
+    def test_re_enable_with_the_retained_path_needs_no_re_browse(self):
+        # The end-to-end point of retaining the path across a disable: after
+        # disabling AI, re-enabling it is a SINGLE action -- pass the
+        # retained self.win.assist.model_path straight back in, exactly what
+        # a dialog reopened after the disable would have prefilled (see
+        # TestApplyNoBackend.test_disable_then_reopening_the_dialog_prefills_the_retained_path)
+        # -- with no need to re-supply/re-browse for the file.
+        model_path = self.write_model()
+        self.win.assist.apply_model_settings('yolo_onnx', model_path)
+        self.assertTrue(self.win.assist.is_available())
+
+        self.win.assist.apply_model_settings(None, '')
+        self.assertFalse(self.win.assist.is_available())
+        self.assertEqual(model_path, self.win.assist.model_path)
+
+        self.win.assist.apply_model_settings('yolo_onnx', self.win.assist.model_path)
+
+        self.assertTrue(self.win.assist.is_available())
+        self.assertEqual('yolo_onnx', self.win.assist.backend_name)
+        self.assertTrue(self.win.assist.action_auto.isEnabled())
+        self.assertEqual('yolo_onnx', self.win.settings.data.get(SETTING_MODEL_BACKEND))
+        self.assertEqual(model_path, self.win.settings.data.get(SETTING_MODEL_PATH))
 
     def test_apply_persists_both_keys_immediately(self):
         model_path = self.write_model()

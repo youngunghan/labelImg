@@ -59,13 +59,17 @@ MIT 사용자가 기대하지 않는 라이선스 의무가 딸려온다. 그래
    Image 등)이 바로 활성화된다. `edit_classify_categories`가 분류 액션을 재빌드하는 것과 같은 방식이다.
 3. 상태 표시줄에 결과를 알린다.
 
-**사용 안 함**을 고르면 백엔드를 비우고 저장된 `model/backend`/`model/path` 키를 둘 다 지운 뒤(경로만
-남겨 봤자 백엔드 이름 없이는 무의미하다) AI 액션을 다시 비활성화한다. **Score Folder로 배치 채점이
-도는 중에 사용 안 함을 골라도 안전하다** — `apply_model_settings`가 백엔드를 떨구기 전에 실행 중인
-배치를 먼저 취소하고(`AssistController.apply_model_settings`, `libs/assist/controller.py:317-455`),
-설령 그 취소가 다른 이유로 스킵되더라도 Score Folder 액션(배치를 멈출 유일한 컨트롤)은 백엔드
-가용성과 무관하게 배치가 도는 동안 계속 눌린다(`refresh_actions`, `:599-679`) — 그래서 스캔 도중
-AI를 꺼도 취소 버튼이 회색으로 죽어버리는 일이 없다.
+**사용 안 함**을 고르면 저장된 `model/backend` 키만 지우고 AI 액션을 다시 비활성화한다 — **모델
+경로(`model/path`, 메모리상 `self.model_path`도 함께)는 그대로 남긴다.** 백엔드 이름 없이는 경로
+혼자 아무것도 하지 못하므로(`AssistController.__init__`이 백엔드가 없으면 항상 `is_available()`을
+False로 두고, `_build_backend`도 백엔드 이름이 없으면 아무것도 만들지 않는다) 남겨두는 것 자체는
+무해하며, 대신 다음에 다시 켤 때 `.onnx` 파일을 또 찾아 지정할 필요 없이 백엔드만 다시 고르면 된다.
+**Score Folder로 배치 채점이 도는 중에 사용 안 함을 골라도 안전하다** — `apply_model_settings`가
+백엔드를 떨구기 전에 실행 중인 배치를 먼저 취소하고(`AssistController.apply_model_settings`,
+`libs/assist/controller.py:349-467`), 설령 그 취소가 다른 이유로 스킵되더라도 Score Folder
+액션(배치를 멈출 유일한 컨트롤)은 백엔드 가용성과 무관하게 배치가 도는 동안 계속 눌린다
+(`refresh_actions`, `:599-679`) — 그래서 스캔 도중 AI를 꺼도 취소 버튼이 회색으로 죽어버리는 일이
+없다.
 
 **모델을 교체(다른 `.onnx`로 다시 적용)해도 이전 모델의 흔적이 남지 않는다**: 화면에 떠 있던 제안
 박스와 그 아래 추적 상태(`_dismissed` 등)는 교체 즉시 전부 지워지고(`AssistController.set_backend`,
@@ -123,7 +127,7 @@ settings.save()
 - 기본 설치 상태(`pyqt5`+`lxml`만, `[ai]` extras도 설정도 없음)에서는 `Ctrl+I`를 눌러도 아무 일도
   일어나지 않는다 — AI 액션 자체가 처음부터 비활성화되어 있고, 메뉴 툴팁에 "No model backend
   configured" 안내가 뜬다(`NO_BACKEND_CONFIGURED_HINT`, `libs/assist/controller.py:86-89`,
-  `_unavailable_hint`/`refresh_actions`, `libs/assist/controller.py:475-486, 599-679`).
+  `_unavailable_hint`/`refresh_actions`, `libs/assist/controller.py:487-498, 611-691`).
 - **AI 메뉴를 켜려면** [위 절차](#내-onnx-모델을-앱에-연결하기)대로 **AI 메뉴 > Model Settings...**에서
   `YOLO (ONNX)`를 고르고 `.onnx` 파일 경로를 지정한다 — `pip install -e ".[ai]"`(onnxruntime+numpy,
   이 저장소 루트에서 실행)도 함께 필요하다. 둘 중 하나라도 빠지면(익스트라 미설치, 경로 미설정, 파일 손상 등)
@@ -144,20 +148,20 @@ settings.save()
 2. **`Ctrl+I`** (`Auto-label Image`) — 현재 이미지에 모델을 돌려 박스를 **제안**으로 올린다
    (`SHORTCUT_AUTO_LABEL`, `libs/assist/controller.py:60`). 이미지가 열려 있고 백엔드가 사용 가능할 때만
    활성화된다. 다시 누르면 이전 라운드의 제안을 지우고 새로 돌린다(`auto_label_image`,
-   `libs/assist/controller.py:720-747`).
+   `libs/assist/controller.py:732-759`).
 3. 제안 박스는 **점선 + 반투명**으로 그려져 실제 박스와 한눈에 구별된다(`Shape.provisional`,
    `libs/shape.py:62`,`110`,`132`,`159-162`). 각 제안에는 모델이 매긴 신뢰도(`Shape.confidence`)가 함께
    붙는다.
 4. **Confidence Threshold** 슬라이더를 움직이면 이미 받은 검출 결과 중 임계값 이상인 것만 다시
    그려진다 — **모델을 다시 돌리지 않는다**(`AssistController.set_threshold`/`_sync_suggestions`,
-   `libs/assist/controller.py:699-716`,`681-716`). 슬라이더는 탐색용이라 실시간으로 켜고 끌 수 있다.
+   `libs/assist/controller.py:711-728`,`693-728`). 슬라이더는 탐색용이라 실시간으로 켜고 끌 수 있다.
 5. **`Ctrl+Return`** (`Accept All Suggestions`) — 화면의 모든 제안을 한 번에 **진짜 박스로 승격**한다.
    승격된 박스는 점선/반투명이 풀리고 일반 색으로 바뀌며, 라벨이 클래스 목록에 없었다면 자동으로
-   추가된다(`accept_all`, `libs/assist/controller.py:964-983`).
+   추가된다(`accept_all`, `libs/assist/controller.py:976-995`).
 6. **`Ctrl+Backspace`** (`Reject All Suggestions`) — 화면의 모든 제안을 한 번에 버린다(`reject_all`,
-   `libs/assist/controller.py:985-996`).
+   `libs/assist/controller.py:997-1008`).
 7. 물론 제안 하나하나를 캔버스에서 골라 `Delete`로 개별적으로 지울 수도 있다 — 지운 제안은 임계값을
-   다시 움직여도 되살아나지 않는다(`discard_shape`, `libs/assist/controller.py:908-925`).
+   다시 움직여도 되살아나지 않는다(`discard_shape`, `libs/assist/controller.py:920-937`).
 
 ## 제안은 받아들이기 전까지 저장되지 않는다
 
@@ -178,7 +182,7 @@ shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.provi
 
 - 예측은 UI 스레드를 막지 않는 별도 워커에서 돈다(`InferenceService`, 단일 워커 QThreadPool). 추론 중에
   다른 이미지로 넘어가면, 이미 떠난 이미지에 대한 느린 결과가 나중에 도착해도 **현재 이미지와 경로가
-  다르면 조용히 버려진다**(`AssistController._is_current`, `libs/assist/controller.py:873-882`) — 새
+  다르면 조용히 버려진다**(`AssistController._is_current`, `libs/assist/controller.py:885-894`) — 새
   이미지에 엉뚱한 박스가 얹히는 사고를 막는다.
 - `Ctrl+D`(Duplicate)로 제안을 복제하면 복제본도 `provisional`을 물려받아 그대로 점선/반투명으로
   남는다(`Shape.copy`, `libs/shape.py:220`,`234-236`) — 저장하려면 마찬가지로 받아들여야 한다.
