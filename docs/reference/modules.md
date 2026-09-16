@@ -92,7 +92,7 @@
 
 | 파일 | 심볼 | 역할 |
 |---|---|---|
-| `libs/inference/types.py` (149줄) | `Detection`(frozen dataclass, `:56`) / `Mask`(`:77`) / `SegPrompt`(`:91`) / `Prediction`(`:104`) / `least_confidence`(`:118`) | 모델 계층의 유일한 어휘. `Detection.box`는 **원본 이미지 픽셀** `(x1,y1,x2,y2)` — letterbox·줌·정규화를 전부 역변환한 뒤의 좌표(좌표 계약, `:10-28`). `least_confidence`는 상위 k 점수 평균의 여집합(액티브러닝 대비, 미구현) |
+| `libs/inference/types.py` (149줄) | `Detection`(frozen dataclass, `:56`) / `Mask`(`:77`) / `SegPrompt`(`:91`) / `Prediction`(`:104`) / `least_confidence`(`:118`) | 모델 계층의 유일한 어휘. `Detection.box`는 **원본 이미지 픽셀** `(x1,y1,x2,y2)` — letterbox·줌·정규화를 전부 역변환한 뒤의 좌표(좌표 계약, `:10-28`). `least_confidence`는 상위 k 점수 평균의 여집합(Phase 4의 Score Folder 배치 채점에서 호출하며, 계산된 불확실성으로 정렬) |
 | `libs/inference/backend.py` (100줄) | `ModelBackend`(ABC, `:36`) / `MissingDependency`(`:26`) | 백엔드 플러그인 시드. `predict`(추상, `:57`)·`segment`/`embed`(기본 `NotImplementedError`, `:66-85`)·`close`(no-op 기본, `:87-92`). `supports_detection`/`supports_segmentation` 캐퍼빌리티 플래그로 UI가 액션을 켜고 끔 |
 | `libs/inference/stub.py` (139줄) | `StubBackend`(`:61`) / `image_size`(`:34`) | 의존성 없는 결정론적 가짜 백엔드 — `predict`(`:105-139`)가 이미지 크기만의 순수 함수로 대각선을 따라 박스를 생성(설계 노트 `:62-74`), 테스트가 정확한 좌표를 assert할 수 있게 함 |
 | `libs/inference/registry.py` (186줄) | `build_backend`(`:127`) / `available_backends`(`:118`) / `register_backend`(`:91`) / `DEFAULT_BACKEND=None`(`:39`) | 이름→백엔드 생성 테이블(`:85-88`: `stub`/`yolo_onnx`). `DEFAULT_BACKEND`가 `None`이라 설정에 `model/backend`가 없으면 **아무 백엔드도 자동 선택되지 않는다** — 기본 설치는 백엔드 미설정 상태(`:140-146`). `MissingDependency`/`ImportError`/그 외 예외를 전부 흡수해 `None`을 반환 — AI 없는 머신에서도 앱이 절대 죽지 않는다(`:163-186`) |

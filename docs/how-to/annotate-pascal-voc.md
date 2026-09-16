@@ -11,7 +11,7 @@ PASCAL VOC는 labelImg의 **기본 포맷**이다(ImageNet에서 쓰는 형식).
 5. 마우스 우드래그로 박스를 복사·이동할 수 있다.
 6. `Ctrl+s`로 저장한다.
 
-포맷이 YOLO/CreateML로 바뀌어 있다면 툴바의 포맷 버튼을 눌러 **PascalVOC**로 되돌린다(VOC→YOLO→CreateML 순환).
+포맷이 YOLO/CreateML/COCO로 바뀌어 있다면 툴바의 포맷 버튼을 눌러 **PascalVOC**로 되돌린다(VOC→YOLO→CreateML→COCO→VOC 순환).
 
 ## 출력 예
 

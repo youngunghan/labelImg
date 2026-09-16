@@ -2,7 +2,7 @@
 
 > ⚠️ **Phase 1~2·4 구현 완료 (Phase 1 머지 `a32acd3`) · Phase 3·5~6 미완료.** 이 페이지가 서술하는 `libs/coco_io.py`·`libs/inference/`(types·backend·stub·registry·service·**yolo_onnx**)·`libs/assist/`(controller·suggestion, 능동학습 포함)·`Shape`의 provisional 필드는 **저장소에 실제로 존재한다.** 아직 끝나지 않은 것은 수락/거부 다듬기, 폴리곤/키포인트, SAM이다. 단계별 현황은 [§단계별 순서](#단계별-순서)를 참조.
 >
-> 이 문서는 여전히 **explanation**이다 — "무엇을 왜 그렇게 지었는가"(설계 근거·트레이드오프)가 본체이고, 구현이 끝난 지금도 그 근거는 그대로다. 인용 규약: **구현된 코드만 `file.py:line`으로 인용**하고(모든 줄 번호는 실제 파일에서 확인함), **아직 없는 Phase 3~6 모듈은 이름으로만 지칭**한다(줄 번호 없음).
+> 이 문서는 여전히 **explanation**이다 — "무엇을 왜 그렇게 지었는가"(설계 근거·트레이드오프)가 본체이고, 구현이 끝난 지금도 그 근거는 그대로다. 인용 규약: **구현된 코드만 `file.py:line`으로 인용**하고(모든 줄 번호는 실제 파일에서 확인함), **Phase 3·5~6에서 아직 없는 모듈은 이름으로만 지칭**한다(줄 번호 없음).
 
 현재 저장소는 [architecture.md](architecture.md)가 서술한 대로 **MainWindow(God-object) ↔ Canvas ↔ Shape ↔ Reader/Writer** 구조의 수동 박스 도구다. 이 설계의 목표는 그 포크를 **AI 보조 주석 도구**로 진화시키되, **`MainWindow`의 God-object 문제를 더 악화시키지 않는 것**이다.
 
@@ -86,7 +86,7 @@ graph TD
 | 모듈 | 책임 (한 줄) | 현황 |
 |---|---|---|
 | `libs/coco_io.py` | `COCOWriter`(`:120`)/`COCOReader`(`:259`). CreateML의 **데이터셋 병합 패턴**(기존 파일을 읽어 현재 이미지 항목만 갈아끼움)을 따르되, 키는 **basename이 아니라 데이터셋 상대경로**다(`dataset_relative_name` `libs/coco_io.py:34-61` — 아래 설계 검증 참조) | **완료** (1a) |
-| `libs/inference/types.py` | `Detection`(`:55`)·`Mask`(`:76`)·`SegPrompt`(`:90`)·`Prediction`(`:103`) 데이터클래스 — AI 심의 어휘. 능동학습 채점 함수 `least_confidence`(`:118`)도 여기 있다(순수 함수, 아직 호출부 없음) | **완료** (1b) |
+| `libs/inference/types.py` | `Detection`(`:55`)·`Mask`(`:76`)·`SegPrompt`(`:90`)·`Prediction`(`:103`) 데이터클래스 — AI 심의 어휘. 능동학습 채점 함수 `least_confidence`(`:118`)도 여기 있다(순수 함수, `AssistController`의 Phase 4 배치 채점에서 호출) | **완료** (1b) |
 | `libs/inference/backend.py` | `ModelBackend` ABC(`:36`) — `predict`(추상, `:57`)/`segment`(`:66`)/`embed`(`:79`) + capability 플래그. 선택 의존성 부재는 `MissingDependency`(`:26`)로 신호 | **완료** (1b) |
 | `libs/inference/stub.py` | `StubBackend`(`:61`) — 결정론적·의존성 0. **테스트를 구동하는 주체**이며, Phase 1 시점의 유일한 백엔드 | **완료** (1b) |
 | `libs/inference/registry.py` | `build_backend(config)` → 백엔드, 의존성이 없으면 예외가 아니라 **`None`**. `DEFAULT_BACKEND`는 `'stub'`가 아니라 **`None`**이다 — 설정에 `model/backend`가 없으면 아무 백엔드도 자동 선택하지 않는다(기본 설치는 백엔드 미설정 상태이고 AI 메뉴는 비활성이다). `'stub'`는 레지스트리에 계속 등록돼 있지만 명시적으로 골라야 쓰인다. ⚠️ 이 파일은 Phase 2에서 `yolo_onnx` 팩토리가 추가되며 이미 한 번 바뀌었고 Phase 6의 `mobile_sam` 팩토리 추가로 다시 바뀔 것이라 **줄 번호를 달지 않는다** | **완료** (1b) · Phase 2에서 `yolo_onnx` 팩토리 추가 완료 |
@@ -270,7 +270,7 @@ shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.provi
 
 컨트롤러 2개로 완화하지만, **진짜 리스크는 규율이다.** "여기 한 줄만"이라며 AI 분기를 `MainWindow` 메서드 안에 넣기 시작하면 분류 기능(`labelImg.py:1805-2089`)이 그랬듯 몇 백 줄이 다시 쌓인다. `MainWindow`가 만져도 되는 것: 컨트롤러 **생성·소유·배선**, 액션을 메뉴와 `onLoadActive`(`labelImg.py:468-471`)에 등록, 저장 초크포인트의 **필터 1줄**. 그 이상은 컨트롤러 안이다.
 
-Phase 1은 이 선을 지켰다(위 §왜 새 클래스인가의 배선 목록). Phase 2~6에서 다시 지켜야 한다.
+Phase 1은 이 선을 지켰다(위 §왜 새 클래스인가의 배선 목록). Phase 2·4에서도 지켰고, 남은 Phase 3·5~6에서도 지켜야 한다.
 
 ### 2. 좌표계 매핑
 

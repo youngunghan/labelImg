@@ -73,11 +73,12 @@ What this fork adds on top of upstream ``b33f965``:
   configured model, the AI menu stays greyed out and the rest of the app is
   unaffected.
 - **COCO import/export** (*File > Import COCO...* / *Export COCO...*) — a fourth
-  annotation format alongside PASCAL VOC/YOLO/CreateML. Unlike those three, COCO
-  is dataset-level (one JSON describes many images), so it is not a per-image
-  save format you switch to — it is an explicit Import/Export lane that merges the
-  current image into a shared dataset ``.json`` (``annotations.json`` in the save
-  directory by default) without disturbing any other image's entries.
+  annotation format alongside PASCAL VOC/YOLO/CreateML, selectable through the
+  format button or ``Ctrl+Y``. COCO is dataset-level (one JSON describes many
+  images): Save and auto-save merge the current image into a shared dataset
+  ``.json`` (``annotations.json`` in the save directory by default), preserving
+  other images' entries. Import/Export COCO... selects the dataset target;
+  saving does not create an individual JSON sidecar for each image.
 - **Good/Bad image triage** — press ``g``/``b`` to move the current image *and*
   its label file into a ``<folder>_good`` / ``<folder>_bad`` sibling folder and
   advance to the next image. Moves are atomic (rolled back if a label move

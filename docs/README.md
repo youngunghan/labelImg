@@ -36,7 +36,7 @@
 | 문서 | 설명 |
 |---|---|
 | [reference/modules.md](reference/modules.md) | 파일별 핵심 클래스/함수 인벤토리 |
-| [reference/formats.md](reference/formats.md) | 세 출력 포맷의 정확한 구조·좌표 규약·라운드트립 |
+| [reference/formats.md](reference/formats.md) | 네 출력 포맷(VOC/YOLO/CreateML/COCO)의 정확한 구조·좌표 규약·라운드트립 |
 | [reference/settings.md](reference/settings.md) | `Settings`와 `.labelImgSettings.pkl`에 저장되는 키 |
 | [reference/shortcuts.md](reference/shortcuts.md) | 단축키(핫키) 전체 표 |
 
@@ -45,9 +45,9 @@
 | 문서 | 설명 |
 |---|---|
 | [explanation/architecture.md](explanation/architecture.md) | 컴포넌트 구성, MainWindow ↔ Canvas ↔ Shape ↔ I/O, Qt 시그널/슬롯 |
-| [explanation/annotation-formats.md](explanation/annotation-formats.md) | 3 포맷 설계, 포맷 전환, reader/writer 대칭, difficult/verified 의미 |
+| [explanation/annotation-formats.md](explanation/annotation-formats.md) | 4 포맷(VOC/YOLO/CreateML/COCO) 설계, 포맷 전환, reader/writer 대칭, difficult/verified 의미 |
 | [explanation/canvas-interaction-model.md](explanation/canvas-interaction-model.md) | CREATE/EDIT 모드, 마우스·정점·도형 이동, 정사각형 제약, 줌/패닝 |
-| [explanation/ml-assist-architecture.md](explanation/ml-assist-architecture.md) | ML 어시스트 스파인의 설계 근거 + 구현 현황 — `InferenceService`·`AssistController`·`ModelBackend`, provisional 도형, 스레딩, COCO 레인, 리스크. **Phase 1(COCO I/O·추론 코어·어시스트 수직 슬라이스) 구현 완료(`a32acd3`), Phase 2~6(실제 ONNX 백엔드·능동학습·폴리곤·SAM) 미구현** |
+| [explanation/ml-assist-architecture.md](explanation/ml-assist-architecture.md) | ML 어시스트 스파인의 설계 근거 + 구현 현황 — `InferenceService`·`AssistController`·`ModelBackend`, provisional 도형, 스레딩, COCO 레인, 리스크. **Phase 1(COCO I/O·추론 코어·어시스트 수직 슬라이스, `a32acd3`)·2(실제 ONNX 백엔드)·4(능동학습 폴더 채점·불확실성 정렬) 구현 완료, Phase 3(수락·거부 다듬기+Auto-label Folder)·5(폴리곤/키포인트)·6(SAM) 미완료** |
 
 ## 코드 조감도 (한 줄)
 

@@ -1,13 +1,13 @@
 # Fork changes vs upstream
 
 - **Upstream**: [HumanSignal/labelImg](https://github.com/HumanSignal/labelImg) @ `b33f965` — archived February 2024 (read-only), so these changes cannot be merged back.
-- **This fork**: [youngunghan/labelImg](https://github.com/youngunghan/labelImg) — maintained independently. Latest snapshot: [`v1.8.6-fork.3`](https://github.com/youngunghan/labelImg/releases/tag/v1.8.6-fork.3) — the first release to include the AI-assist work (Phase 1–4 + COCO).
+- **This fork**: [youngunghan/labelImg](https://github.com/youngunghan/labelImg) — maintained independently. Latest snapshot: [`v1.8.6-fork.6`](https://github.com/youngunghan/labelImg/releases/tag/v1.8.6-fork.6) — AI-assist work first shipped in [`v1.8.6-fork.3`](https://github.com/youngunghan/labelImg/releases/tag/v1.8.6-fork.3) (Phase 1–4 + COCO).
 
 ## At a glance
 
 | Metric | Value |
 |---|---|
-| Diff vs upstream | 63 files, **+12,641 / −114** |
+| Diff vs upstream | 65 files, **+14,103 / −114** |
 | Core app (`labelImg.py`) | +754 / −34 |
 | New documentation | `docs/` tree: 21 files, ~2,050 lines (Diátaxis: tutorials / how-to / reference / explanation) |
 | Packaging | reproducible PyInstaller `labelImg.spec` (SPECPATH-anchored, bundles `data/`, surgically bundles onnxruntime + numpy into the exe when `[ai]` is installed at build time — no model weights, but the in-app **Model Settings...** dialog picks the `.onnx` path); optional `ai` extra (`pip install -e ".[ai]"` from this checkout — not published to PyPI under the `labelImg` name) |
@@ -267,10 +267,12 @@ Effort: **S** small / **M** medium / **L** large.
     (`6b48a38`, hardened in `a32acd3`); the real `YoloOnnxBackend` (ONNX YOLOv5/v8 via
     `onnxruntime`) and the optional `[ai]` extra shipped Phase 2 (`d324e41`, letterbox
     fix `c2ecf8e`).
-22. ~~**[M] Auto-label Folder**~~ — **done (2026-07-15, Phase 4)**: `AssistController.score_folder`
-    batch-runs the model across every image in `m_img_list`, one at a time (so a large
+22. ~~**[M] Score Folder for Active Learning**~~ — **done (2026-07-15, Phase 4)**:
+    `AssistController.score_folder` batch-runs the model across every image in
+    `m_img_list`, one at a time, records an uncertainty score for each image (so a large
     folder never blocks the UI thread), and is cancellable mid-run by triggering the
-    same action again (`libs/assist/controller.py:977-1051`).
+    same action again (`libs/assist/controller.py:1077-1151`). It scores the folder for
+    active-learning review; it does not create suggestions or labels on each image.
 23. ~~**[S/M] Active learning (uncertainty-sorted review queue)**~~ — **done (2026-07-15,
     Phase 4)**: `sort_by_uncertainty` (`Ctrl+Shift+U`) reorders `m_img_list` by
     `least_confidence`, most-uncertain-first, so the existing `g`/`b` triage walks the

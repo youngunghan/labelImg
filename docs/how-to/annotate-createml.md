@@ -7,7 +7,7 @@ CreateML 포맷은 Apple CreateML 객체 검출 학습용이다. JSON 최상위�
 ## 절차
 
 1. 앱을 실행한다.
-2. 툴바 포맷 버튼을 눌러 **CreateML**로 바꾼다(VOC→YOLO→CreateML 순환).
+2. 툴바 포맷 버튼을 눌러 **CreateML**로 바꾼다(VOC→YOLO→CreateML→COCO→VOC 순환).
 3. `Open`/`Open Dir`로 이미지를 열고 박스를 그린다.
 4. `Ctrl+s`로 저장한다.
 

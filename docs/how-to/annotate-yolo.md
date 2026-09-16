@@ -6,7 +6,7 @@ YOLO 포맷은 이미지마다 동일 이름 `.txt`를 만들고, 폴더에 `cla
 
 1. **먼저** 학습에 쓸 클래스 목록을 정의한다(한 줄당 하나). 앱 실행 후 **File → Edit Default Classes**(`Ctrl+Shift+E`)로 편집하는 것을 권장하며, 저장 시 영속 클래스 파일에 즉시 기록된다. 이 파일은 소스 실행(`python labelImg.py`) 시 `data/predefined_classes.txt`, **빌드된 exe 실행 시에는 exe 옆의 `predefined_classes.txt`**다(첫 실행 때 번들 기본값이 한 번 복사될 뿐, 이후에는 저장소의 `data/predefined_classes.txt`를 고쳐도 exe에 반영되지 않는다).
 2. 앱을 실행한다.
-3. 툴바의 **Save 버튼 바로 아래 포맷 버튼**을 눌러(또는 `Ctrl+Y`) `PascalVOC`에서 **YOLO**로 바꾼다(VOC→YOLO→CreateML 순환).
+3. 툴바의 **Save 버튼 바로 아래 포맷 버튼**을 눌러(또는 `Ctrl+Y`) `PascalVOC`에서 **YOLO**로 바꾼다(VOC→YOLO→CreateML→COCO→VOC 순환).
 4. `Open`/`Open Dir`로 이미지를 열고 박스를 그린다.
 5. 이미지마다 작업을 마치면 `Ctrl+s`로 저장한다.
 
