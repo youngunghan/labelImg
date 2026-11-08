@@ -1,5 +1,9 @@
 # 캔버스 상호작용 모델
 
+> **범위:** Canvas의 마우스·키보드·휠 상호작용 모델 — CREATE/EDIT 두 모드, 박스 그리기, 선택·이동·정점 편집, 정사각형 그리기, 렌더링(paintEvent), 줌·밝기·스크롤, 커서를 설명한다. 전체 구성은 다루지 않는다([architecture.md](architecture.md)), 단축키 표는 [../reference/shortcuts.md](../reference/shortcuts.md)를 본다.
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 `Canvas`(`libs/canvas.py:24`)는 마우스·키보드·휠로 박스를 그리고 편집하는 모든 동작의 무대다. 핵심은 **두 모드(CREATE/EDIT)** 와 **선택 상태**가 같은 이벤트 핸들러의 분기를 결정한다는 점이다.
 
 ## 두 모드

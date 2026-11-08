@@ -1,5 +1,9 @@
 # How-to: 라벨을 CSV로 내보내기 (AutoML)
 
+> **범위:** tools 폴더의 label_to_csv 스크립트로 YOLO txt 또는 PASCAL VOC xml 라벨 묶음을 Google Cloud AutoML 객체 검출용 단일 CSV로 변환하는 방법 — 입력 폴더 구조, 실행, 출력, 코드 특성상 주의사항을 다룬다. labelImg 본체 기능이 아닌 독립 스크립트이며 포맷 구조는 다루지 않는다([../reference/formats.md](../reference/formats.md)).
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-07-13.
+
 `tools/label_to_csv.py`는 YOLO txt 또는 PASCAL VOC xml 라벨 묶음을 **Google Cloud AutoML 객체 검출용 단일 CSV**로 변환하는 독립 스크립트다. labelImg 본체(PyQt5)와는 import 관계가 없고 `pandas`만 필요하다.
 
 ## 입력 폴더 구조

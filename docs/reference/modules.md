@@ -1,5 +1,9 @@
 # 레퍼런스: 모듈 인벤토리
 
+> **범위:** 저장소의 파일별 핵심 클래스/함수 인벤토리 — 앱 본체, canvas·shape·labelFile, I/O 모듈, inference·assist(ML-assist) 패키지, 설정·i18n·유틸, 소형 위젯, 도구·빌드를 조회용으로 나열한다. 컴포넌트 간 구성과 흐름은 다루지 않는다([../explanation/architecture.md](../explanation/architecture.md)).
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-09-16.
+
 파일별 핵심 클래스/함수. 라인 번호는 현재 저장소(`D:\labelImg`) 기준이다.
 
 ## `labelImg.py` (2442줄) — 앱 본체

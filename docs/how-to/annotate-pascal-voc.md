@@ -1,5 +1,9 @@
 # How-to: PASCAL VOC(XML) 라벨링
 
+> **범위:** PASCAL VOC(XML) 포맷(기본 포맷)으로 라벨링하는 절차, 출력 예, 어노테이션 시각화(검수), 사전 정의 클래스를 다룬다. 포맷의 정확한 구조는 다루지 않는다([../reference/formats.md](../reference/formats.md)). 다른 포맷은 [annotate-yolo.md](annotate-yolo.md)·[annotate-createml.md](annotate-createml.md)·[annotate-coco.md](annotate-coco.md)를 본다.
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-09-16.
+
 PASCAL VOC는 labelImg의 **기본 포맷**이다(ImageNet에서 쓰는 형식). 이미지마다 별도 `.xml`이 생긴다.
 
 ## 절차

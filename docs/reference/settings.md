@@ -1,5 +1,9 @@
 # 레퍼런스: 설정
 
+> **범위:** 사용자 홈 디렉터리의 설정 pickle 파일에 UI 상태를 저장하는 Settings 클래스의 동작, 저장되는 키(constants 정의), 기타 상수를 조회용으로 정리한다. 설정 초기화 절차는 다루지 않는다([../how-to/reset-and-troubleshoot.md](../how-to/reset-and-troubleshoot.md)).
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 labelImg는 UI 상태를 **사용자 홈 디렉터리의 `~/.labelImgSettings.pkl`** 에 pickle로 저장한다. 구현은 `libs/settings.py`의 `Settings` 클래스.
 
 ## `Settings` 동작

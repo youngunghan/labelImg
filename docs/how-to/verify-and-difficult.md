@@ -1,5 +1,9 @@
 # How-to: verify · difficult · 작업 모드
 
+> **범위:** 라벨링 속도를 높이는 플래그·모드 — Verify, Difficult, Single Class Mode와 use default label의 차이, Auto Save, 정사각형 그리기, 라벨 표시를 다룬다. 단축키 전체 표는 다루지 않는다([../reference/shortcuts.md](../reference/shortcuts.md)). 그 밖의 부가 기능은 [more-features.md](more-features.md)를 본다.
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 라벨링 속도를 높이는 플래그·모드 모음.
 
 ## Verify(검증) 플래그

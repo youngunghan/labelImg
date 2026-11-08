@@ -1,5 +1,9 @@
 # 레퍼런스: 어노테이션 포맷
 
+> **범위:** 네 출력 포맷(PASCAL VOC·YOLO·CreateML·COCO)의 정확한 구조·좌표 규약·공통 Reader 인터페이스를 조회용으로 정리한다. 배경과 설계 의도는 다루지 않는다([../explanation/annotation-formats.md](../explanation/annotation-formats.md)), 라벨링 절차는 포맷별 how-to([../how-to/annotate-pascal-voc.md](../how-to/annotate-pascal-voc.md) 등)를 본다.
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 네 출력 포맷의 **정확한 구조**다. 배경·설계 의도는 [../explanation/annotation-formats.md](../explanation/annotation-formats.md).
 
 공통 전제: **VOC·YOLO·COCO는** 저장 직전 박스가 `(x_min, y_min, x_max, y_max)` 절대 픽셀 정수로 환원되며(`LabelFile.convert_points_to_bnd_box`, `libs/labelFile.py:182-205`, 호출부는 `labelFile.py:79`(COCO)`, 109`(VOC)`, 139`(YOLO)), `x_min`/`y_min`은 1 미만이면 1로 클램프된다. **CreateML은 이 변환을 거치지 않는다** — 캔버스의 float 좌표가 가공 없이 사용되어 저장값(중심 `x`/`y`, `width`/`height`)에 소수점(예: 297.5)이 나올 수 있고 1-클램프도 적용되지 않는다(`labelFile.py:41-53`, `create_ml_io.py:42-47, 73-93`). 이미지 크기는 `[height, width, depth]` 순서(`depth`=grayscale 1, 그 외 3).

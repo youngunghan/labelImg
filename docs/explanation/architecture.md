@@ -1,5 +1,9 @@
 # 아키텍처
 
+> **범위:** 단일 윈도우 데스크톱 앱 labelImg의 구성 — MainWindow(컨트롤러)·Canvas(뷰)·Shape(모델), LabelFile 파사드와 Reader/Writer, AI 어시스트 컨트롤러, 기반 모듈, 리소스 파이프라인, 진입점을 설명한다. 파일별 클래스/함수 목록은 다루지 않는다([../reference/modules.md](../reference/modules.md)). ML 어시스트의 설계 근거는 [ml-assist-architecture.md](ml-assist-architecture.md)를 본다.
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 labelImg는 **단일 윈도우 데스크톱 앱**이다. 외부 서버·DB·네트워크가 없고, 모든 상태는 메모리에 있으며 결과는 디스크의 라벨 파일(및 포크의 good/bad 분류 시 이동되는 이미지·라벨 파일)로 떨어진다. 구조는 전형적인 **컨트롤러 + 뷰 + 모델** 변형이다.
 
 ```

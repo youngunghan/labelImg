@@ -1,5 +1,9 @@
 # 레퍼런스: 단축키(핫키)
 
+> **범위:** 코드의 액션 정의 기준 전체 단축키 표 — 파일·디렉터리, 박스 그리기·편집, 보기(줌·맞춤·밝기), 검증·모드·색, AI(모델 보조 라벨링), 이미지 분류(파일 이동)를 다룬다. 기능 설명은 다루지 않는다([../how-to/more-features.md](../how-to/more-features.md), [../how-to/verify-and-difficult.md](../how-to/verify-and-difficult.md)). 루트 README의 핫키 표는 이 문서의 일부만 싣는다.
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-07-21.
+
 코드의 액션 정의(`labelImg.py` `__init__`) 기준 전체 단축키. 루트 [../../README.rst](../../README.rst)의 핫키 표는 이 중 일부만 싣는다.
 
 ## 파일·디렉터리

@@ -1,5 +1,9 @@
 # 어노테이션 포맷 설계
 
+> **범위:** PASCAL VOC·YOLO·CreateML·COCO 네 저장 포맷의 설계 근거 — 공통 박스 모델, 좌표 규약 비교, 포맷 전환, reader/writer 대칭, 설계상 함정을 설명한다. 필드 단위의 정확한 구조는 다루지 않는다([../reference/formats.md](../reference/formats.md)), 절차는 [../how-to/annotate-pascal-voc.md](../how-to/annotate-pascal-voc.md) 등 포맷별 how-to를 본다.
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 labelImg는 같은 화면 작업 결과를 **네 가지 포맷**으로 저장할 수 있다: PASCAL VOC(XML), YOLO(txt), CreateML(JSON), COCO(JSON, 데이터셋 단위). 이 글은 "왜 네 포맷인지, 어떻게 전환되는지, reader/writer가 어떻게 대칭을 이루는지"를 설명한다. 바이트 단위 정확한 구조는 [../reference/formats.md](../reference/formats.md)에 있다.
 
 ## 공통 데이터 모델: 축 정렬 박스

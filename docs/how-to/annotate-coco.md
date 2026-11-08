@@ -1,5 +1,9 @@
 # How-to: COCO(JSON) 라벨링
 
+> **범위:** COCO(JSON) 포맷으로 라벨링하는 절차 — 이미지별 사이드카가 아니라 데이터셋 json 하나를 쓰는 방식, 저장 시 read-modify-write 병합, 출력 형식, `.json` 확장자 충돌(COCO vs CreateML), 알려진 한계를 다룬다. 포맷의 정확한 구조는 다루지 않는다([../reference/formats.md](../reference/formats.md)).
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 COCO는 이 포크가 지원하는 4번째 포맷이며, 나머지 셋(PascalVOC/YOLO/CreateML)과 근본적으로 다르다.
 **COCO는 이미지별 사이드카가 아니라 데이터셋 전체를 담는 파일 하나**다 — `images[]`/`annotations[]`/`categories[]`가
 여러 이미지를 한 json에 함께 담는다. 그래서 이 앱도 COCO만은 "이미지 stem에서 유도한 파일"이 아니라

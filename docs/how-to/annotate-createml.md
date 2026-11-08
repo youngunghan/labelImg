@@ -1,5 +1,9 @@
 # How-to: CreateML(JSON) 라벨링
 
+> **범위:** CreateML(JSON) 포맷으로 라벨링하는 절차와 출력, 주의사항을 다룬다. 포맷의 정확한 구조는 다루지 않는다([../reference/formats.md](../reference/formats.md)). 다른 포맷은 [annotate-pascal-voc.md](annotate-pascal-voc.md)·[annotate-yolo.md](annotate-yolo.md)·[annotate-coco.md](annotate-coco.md)를 본다.
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-09-16.
+
 CreateML 포맷은 Apple CreateML 객체 검출 학습용이다. JSON 최상위가 **이미지 객체들의 리스트**라는 점이 특징이다.
 
 > ⚠️ **기본 저장 단위**: 앱의 일반 저장(`Ctrl+S`)은 다른 포맷과 똑같이 **이미지마다 `<이미지이름>.json`** 을 만든다(`save_file`→`save_labels`가 이미지 stem에 `.json`을 붙임, `labelImg.py:1067-1069`). 따라서 기본적으로는 각 JSON이 **이미지 1개짜리 리스트**다. `CreateMLWriter` 자체는 같은 출력 파일을 재사용하면 여러 이미지를 한 파일에 누적(같은 `image`는 교체, 없으면 append)할 수 있지만, 그건 같은 `output_file`을 반복 지정할 때만이고 기본 `Ctrl+S` 경로는 그렇게 하지 않는다.

@@ -1,5 +1,9 @@
 # How-to: YOLO(txt) 라벨링
 
+> **범위:** YOLO(txt + classes.txt) 포맷으로 라벨링하는 절차, 출력, 주의사항, CSV 내보내기 연결을 다룬다. 포맷의 정확한 구조는 다루지 않는다([../reference/formats.md](../reference/formats.md)). CSV 변환 상세는 [export-to-csv.md](export-to-csv.md)를 본다.
+> **대상:** 사용자.
+> **상태:** 구현 반영 — 기준일 2026-09-16.
+
 YOLO 포맷은 이미지마다 동일 이름 `.txt`를 만들고, 폴더에 `classes.txt`(클래스 인덱스 정의)를 함께 둔다. 학습기에 바로 넣기 좋은 정규화 좌표다.
 
 ## 절차

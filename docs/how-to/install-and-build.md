@@ -1,5 +1,9 @@
 # How-to: 설치 · 빌드 · 패키징
 
+> **범위:** labelImg 설치·빌드·패키징 — PyPI 설치, 소스에서 실행(Linux/macOS/Windows), AI 자동 라벨링 extra, Makefile 빌드 타겟, pyinstaller 단일 실행파일과 onnxruntime 번들, 테스트 실행, PyPI 패키징/배포를 다룬다. 처음 실행 따라하기는 다루지 않는다([../tutorials/first-run.md](../tutorials/first-run.md)).
+> **대상:** 개발자.
+> **상태:** 구현 반영 — 기준일 2026-07-20.
+
 ## 의존성
 
 - **Python 3.7 이상**. `setup.py`의 `REQUIRES_PYTHON='>=3.7'`.
