@@ -12,6 +12,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ['3.9', '3.12']
+        # ubuntu-latest is Ubuntu 26.04, which has no Python 3.9 build in actions/python-versions; 24.04 does.
+        exclude:
+          - os: ubuntu-latest
+            python: '3.9'
+        include:
+          - os: ubuntu-24.04
+            python: '3.9'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
